@@ -86,5 +86,5 @@ After the environment is managed and the region is validated:
 
 1. Run `./scripts/00-prereqs.sh` so the local toolchain is checked (`az` 2.60+, Bicep, PowerShell 7+, `jq`, and `bash`) and the required resource providers plus `enterprisePoliciesPreview` are registered.
 2. Run `./scripts/01-deploy.sh` to deploy the Azure resources and produce `.azure/last-deploy-outputs.json` with `<enterprisePolicyArmId>`.
-3. Run `./scripts/02-configure-pp-vnet.ps1 -EnvironmentId <environmentId>`. That script auto-installs the pinned `Microsoft.PowerPlatform.EnterprisePolicies` module version if needed, validates the environment region again, and then either links the environment to `<enterprisePolicyArmId>` or exits cleanly if the same policy is already linked.
+3. Run `./scripts/02-configure-pp-vnet.ps1 -EnvironmentId <environmentId>`. That script auto-installs the pinned `Microsoft.PowerPlatform.EnterprisePolicies` module version (0.17.0) if needed, validates the environment region again, and then either links the environment to `<enterprisePolicyArmId>` or exits cleanly if the same policy is already linked (making it safe to re-run).
 4. Build connector flows by following the docs in [./connectors](./connectors/keyvault.md).

@@ -92,10 +92,10 @@ Link the Managed Environment to the enterprise policy.
 
 What this step should do:
 
+- Auto-install or import the pinned [Microsoft.PowerPlatform.EnterprisePolicies module](https://learn.microsoft.com/en-us/powershell/module/microsoft.powerplatform.enterprisepolicies/) version 0.17.0 if needed.
 - Confirm the environment region with `Get-EnvironmentRegion`.
-- Use `Enable-SubnetInjection` from the [Microsoft.PowerPlatform.EnterprisePolicies module](https://learn.microsoft.com/en-us/powershell/module/microsoft.powerplatform.enterprisepolicies/).
-- Link the environment to `<enterprisePolicyArmId>`.
-- Return a success message that confirms the policy association.
+- Use `Enable-SubnetInjection` to link the environment to `<enterprisePolicyArmId>`.
+- If the same policy is already linked, exit cleanly with no changes applied (the script is safe to re-run).
 
 ### Validation checkpoints
 
