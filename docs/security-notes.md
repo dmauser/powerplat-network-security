@@ -59,6 +59,8 @@ All three demo services should keep `publicNetworkAccess=Disabled`:
 
 That setting is essential to the story. If public access stays enabled, the audience can reasonably ask whether the connector succeeded because private access was really in place or simply because the service still had a public path available. Disabling public access proves the environment is relying on private endpoints, private DNS, and the delegated subnet path described in [architecture.md](./architecture.md).
 
+For this repo specifically, treat network ACL bypass settings as defense-in-depth. Both Key Vault and Storage set `networkAcls.bypass = 'None'` because `publicNetworkAccess = 'Disabled'` already prevents any inbound public traffic; the bypass property applies only to the public-endpoint firewall, which is off, so retaining `'AzureServices'` would add confusion without adding protection. The resulting posture is: **all access to Key Vault and Storage flows exclusively through private endpoints; no public-endpoint bypass is in effect**.
+
 ## Secret rotation guidance
 
 For the Key Vault demo and any production follow-on:
@@ -75,6 +77,9 @@ For the lab, lightweight diagnostics are enough to prove the private path:
 - Key Vault diagnostic logs or access logs.
 - NSG flow logs if you extend the network with NSGs.
 - Connector run history inside Power Automate.
+- A private-name-resolution check from inside the injected path, such as the Managed Environment runtime or a jump host in one of the VNets.
+
+Be careful not to overstate what an external validation script proves. A public-side DNS lookup can confirm the Private Link CNAME chain and control-plane settings, but only an in-path test proves that the runtime resolved the service FQDN to the private endpoint IP.
 
 For a production expansion, send Key Vault and other service diagnostics to Log Analytics and centralize alerting and retention policy. That future-state recommendation is part of [expansion-roadmap.md](./expansion-roadmap.md).
 

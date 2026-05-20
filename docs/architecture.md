@@ -55,7 +55,7 @@ The maker demonstrates the runtime experience inside the Managed Environment:
 
 ## Network topology
 
-The lab intentionally uses the same paired-region requirement that Learn calls out for the United States: the Power Platform geography is **United States**, and the Azure network footprint is **eastus + westus**. The private endpoints live in the eastus VNet, while the delegated subnet exists in both VNets so Power Platform can fail over consistently across the supported pair.
+The lab intentionally uses the same paired-region requirement that Learn calls out for the United States: the Power Platform geography is **United States**, and the Azure network footprint is **eastus + westus**. The private endpoints live in the eastus VNet, while the delegated subnet exists in both VNets so Power Platform can fail over consistently across the supported pair. Shared PaaS resources (Key Vault, SQL, Storage) and the resource group also default to `eastus`, keeping the IaC self-documenting and consistent with the primary paired region.
 
 ```mermaid
 flowchart LR
@@ -182,7 +182,7 @@ Identity flow at runtime:
 
 ### Deployed by Bicep
 
-The infrastructure deployment is expected to create the Azure-side topology and emit the outputs referenced throughout this doc set:
+The infrastructure deployment creates the Azure-side topology and emits the outputs referenced throughout this doc set:
 
 - VNets, subnets, peering, and subnet delegation.
 - Private DNS zones and links.
@@ -190,6 +190,7 @@ The infrastructure deployment is expected to create the Azure-side topology and 
 - Private endpoints in VNet-East `snet-pep`.
 - User-assigned managed identity.
 - Enterprise policy resource with `kind=NetworkInjection`.
+- Key Vault secrets `demo-secret` and `sql-connection-string`.
 - Outputs: `<enterprisePolicyArmId>`, `<keyVaultName>`, `<keyVaultUri>`, `<sqlServerFqdn>`, `<sqlDatabaseName>`, `<storageAccountName>`, `<userAssignedIdentityPrincipalId>`.
 
 ### Configured by the PowerShell script
@@ -207,6 +208,7 @@ The maker configures runtime artifacts after the environment is linked:
 
 - Create or update flows in the Managed Environment.
 - Build connector connections using the placeholders from deployment outputs.
+- Prepare demo data that is not created by Bicep today, such as SQL objects and sample rows like `dbo.Sales`, and blob content such as `demo/hello.txt`.
 - Run the validation flows documented in [deployment-guide.md](./deployment-guide.md) and [demo-script.md](./demo-script.md).
 
 ## Learn more

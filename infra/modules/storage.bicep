@@ -31,7 +31,9 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     networkAcls: {
       defaultAction: 'Deny'
-      bypass: 'AzureServices'
+      // bypass='None': publicNetworkAccess is Disabled, so the public-endpoint firewall (and its bypass) never fires.
+      // Setting 'None' makes the defense-in-depth intent explicit and removes the misleading 'AzureServices' exception.
+      bypass: 'None'
     }
   }
 }

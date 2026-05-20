@@ -8,6 +8,7 @@ This walkthrough shows how to validate private Azure SQL Database access from th
 - [Before you start](#before-you-start)
 - [Build the flow](#build-the-flow)
 - [Expected result](#expected-result)
+- [Testing the private path](#testing-the-private-path)
 - [Notes](#notes)
 - [Learn more](#learn-more)
 
@@ -41,6 +42,51 @@ Confirm all of the following:
 ## Expected result
 
 A successful run should show one or more rows returned from `dbo.Sales` in the test output. Use those rows to explain that the SQL connection stayed private while still using a standard first-party Power Platform connector.
+
+## Testing the private path
+
+After building the flow, validate the deny and allow paths to confirm private-only access is working.
+
+### Public denial probe from your workstation
+
+From your local machine, prove the public SQL port is blocked:
+
+```powershell
+Test-NetConnection -ComputerName '<sqlServerFqdn>' -Port 1433 |
+  Select-Object ComputerName, RemotePort, TcpTestSucceeded
+# Expected: TcpTestSucceeded = False
+```
+
+This confirms that the server is not reachable over public TCP 1433. The Managed Environment flow succeeds only because it uses the private endpoint path.
+
+### Verify private DNS resolution
+
+From the Azure portal or via `az network private-dns record-set a show`:
+
+```bash
+az network private-dns record-set a show \
+  --resource-group <resource-group> \
+  --zone-name privatelink.database.windows.net \
+  --name '<sqlServerFqdn>' \
+  --query aRecords[0].ipv4Address -o tsv
+# Expected: private endpoint IP (e.g., 10.10.1.5)
+```
+
+The Managed Environment flow resolves this FQDN to the private endpoint IP, not the public endpoint.
+
+### Private DNS zone link verification
+
+Confirm the private DNS zone is linked to both VNets:
+
+```bash
+az network private-dns link vnet list \
+  --resource-group <resource-group> \
+  --zone-name privatelink.database.windows.net \
+  --query "[].virtualNetwork.id" -o tsv
+# Expected: both VNet resource IDs (eastus and westus)
+```
+
+Both VNets must be linked so that flows from either delegated subnet can resolve the private endpoint.
 
 ## Notes
 

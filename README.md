@@ -1,6 +1,6 @@
 # Private Power Platform Access to Azure Key Vault (and friends) via VNet support
 
-[![Bicep validate](https://github.com/dmauser/powerbi-network-security/actions/workflows/bicep-validate.yml/badge.svg)](https://github.com/dmauser/powerbi-network-security/actions/workflows/bicep-validate.yml)
+[![Bicep validate](https://github.com/dmauser/powerplat-network-security/actions/workflows/bicep-validate.yml/badge.svg)](https://github.com/dmauser/powerplat-network-security/actions/workflows/bicep-validate.yml)
 
 A low-cost, end-to-end lab that reproduces the supported configuration in the Microsoft Learn diagram
 [**Virtual Network support configurations**](https://learn.microsoft.com/en-us/power-platform/admin/media/vnet-support/vnet-support-configurations.png#lightbox) — i.e., how a **Power Platform** flow (Power Automate / Power Apps / Dataverse plug-in) reaches **private** Azure resources over VNet-injected subnets.
@@ -8,24 +8,34 @@ A low-cost, end-to-end lab that reproduces the supported configuration in the Mi
 The primary demo is **Azure Key Vault** with `publicNetworkAccess=Disabled`, called from the built-in Power Automate **Azure Key Vault** connector. Three additional connectors (SQL Server, Azure Blob Storage, custom HTTP) are exercised against the same delegated subnets to prove the pattern generalizes.
 
 > This is a **Power Platform** demo. For Power BI / Fabric private access via **VNet Data Gateway**, see [`docs/expansion-roadmap.md`](./docs/expansion-roadmap.md).
-> The previous Fabric Managed Private Endpoint lab content lives in [`archive/`](./archive).
+
+## Contents
+
+- [What gets deployed](#what-gets-deployed)
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+- [Repo layout](#repo-layout)
+- [Roles in this configuration](#roles-in-this-configuration)
+- [Documentation index](#documentation-index)
+- [References](#references)
 
 ---
 
 ## What gets deployed
 
-![Architecture](./assets/architecture-diagram.mmd)
+See the topology walkthrough in [`docs/architecture.md`](./docs/architecture.md) and the diagram source in [`assets/architecture-diagram.mmd`](./assets/architecture-diagram.mmd).
 
 | Component | Notes |
 |---|---|
 | 2× VNet (eastus, westus) | US Power Platform geography requires **two** paired regions. Each has `snet-pp-delegated /27` + `snet-pep /27`. Bidirectional global peering. |
 | 3× Private DNS zones | `privatelink.{vaultcore.azure.net, database.windows.net, blob.core.windows.net}`. **Linked to both VNets.** |
-| Azure Key Vault | RBAC mode, public access **Disabled**, purge protection. Seeded with `demo-secret` and `sql-connection-string`. |
-| Azure SQL DB | Serverless GP, 1h auto-pause, AAD-only auth, public access **Disabled**. Seeded with `dbo.Sales`. |
-| Storage account | GPv2, public access **Disabled**, blob container `demo` with `hello.txt`. |
+| Azure Key Vault | RBAC mode, public access **Disabled**, purge protection. Bicep seeds `demo-secret` and `sql-connection-string`. |
+| Azure SQL DB | Serverless GP, 1h auto-pause, AAD-only auth, public access **Disabled**. The logical server and database are deployed by Bicep; demo table content such as `dbo.Sales` is prepared separately for the walkthrough. |
+| Storage account | GPv2, public access **Disabled**. Bicep creates the `demo` container; demo blob content such as `hello.txt` is prepared separately for the walkthrough. |
 | 3× Private endpoints | All in VNet-East / `snet-pep`. Reached from the other VNet via peering. |
 | User-assigned managed identity | Used as KV Secrets User, Storage Blob Data Reader, and SQL AAD admin. |
 | `Microsoft.PowerPlatform/enterprisePolicies` | kind = `NetworkInjection`, references both delegated subnets. |
+| Resource group and shared resource location | Defaults to `eastus`, matching the primary paired region for the United States Power Platform geography (eastus + westus). |
 | Power Platform Managed Environment | Provisioned manually (US geo), linked via `Enable-SubnetInjection`. |
 
 Idle Azure cost is **a few USD/month** — see [`docs/cost-control.md`](./docs/cost-control.md).
@@ -79,7 +89,6 @@ docs/                   Architecture, deployment, demo script, troubleshooting
 docs/connectors/        Per-connector maker steps
 assets/                 Mermaid diagrams (roles, topology, sequence)
 .github/workflows/      CI: bicep build + what-if (no deploy)
-archive/                Previous Fabric-MPE lab content (read-only reference)
 ```
 
 ---

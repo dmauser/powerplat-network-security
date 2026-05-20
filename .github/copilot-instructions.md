@@ -2,7 +2,7 @@
 
 ## Repository status
 
-This repo now centers on documentation for a **Power Platform VNet support demo lab**. The previous Fabric Managed Private Endpoint → Azure SQL → Power BI demo remains in [`archive/`](../archive) as read-only reference. Do not edit or extend files in `archive/` unless explicitly asked.
+This repo centers on documentation for a **Power Platform VNet support demo lab**.
 
 ## Architecture overview
 
@@ -12,7 +12,6 @@ Documentation lives under [`docs/`](../docs), with connector-specific walkthroug
 
 ## Repository conventions
 
-- New active content lives at the repo root; `archive/` is read-only unless explicitly requested.
 - Prefer pure GitHub-flavored Markdown; do not use HTML in docs.
 - Each doc should start with a short summary paragraph, then a contents list, then the main body.
 - Use ATX headings (`#`, `##`, `###`).

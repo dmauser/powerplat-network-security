@@ -1,5 +1,5 @@
 flowchart TB
-    subgraph Sub["Azure subscription — rg-pbinet-dev"]
+    subgraph Sub["Azure subscription"]
         subgraph East["VNet-East (eastus) 10.10.0.0/16"]
             EDeleg["snet-pp-delegated /27<br/>delegated to<br/>Microsoft.PowerPlatform/<br/>enterprisePolicies"]
             EPep["snet-pep /27<br/>privateEndpointNetworkPolicies: Disabled"]

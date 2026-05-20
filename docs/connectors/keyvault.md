@@ -9,6 +9,7 @@ This walkthrough shows a maker how to prove the primary lab scenario: a flow in 
 - [Build the flow](#build-the-flow)
 - [Expected result](#expected-result)
 - [Without VNet support](#without-vnet-support)
+- [Testing the private path](#testing-the-private-path)
 - [Troubleshooting checklist](#troubleshooting-checklist)
 - [Learn more](#learn-more)
 
@@ -55,6 +56,48 @@ Use the output as the baseline proof point for the rest of the lab.
 ## Without VNet support
 
 If you repeat the same action from a non-Managed or non-linked environment, the likely outcome is `403 Forbidden`. The reason is not usually the action itself; it is that the environment is not using the delegated subnet path required by [Power Platform virtual network support](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview), so the request cannot reach the private-only vault correctly.
+
+## Testing the private path
+
+After building the flow, validate that it is using the private path by confirming that public access to the vault stays blocked while the Managed Environment run succeeds.
+
+### Public denial probe from your workstation
+
+From your local machine (not the Managed Environment), prove the public endpoint is blocked:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" "https://<keyVaultName>.vault.azure.net/secrets/demo-secret?api-version=7.4"
+# Expected: 403
+```
+
+This `403` confirms that `publicNetworkAccess=Disabled` is still enforced. The only way the Managed Environment flow succeeds is through the private endpoint path.
+
+### Verify private DNS resolution
+
+From the Azure portal or via `az network private-dns record-set a show`:
+
+```bash
+az network private-dns record-set a show \
+  --resource-group <resource-group> \
+  --zone-name privatelink.vaultcore.azure.net \
+  --name <keyVaultName> \
+  --query aRecords[0].ipv4Address -o tsv
+# Expected: private endpoint IP (e.g., 10.10.1.4)
+```
+
+Compare this private IP to the Azure portal view of the private endpoint in `snet-pep`.
+
+### Private DNS zone link verification
+
+Confirm that the private DNS zone is linked to both VNets (required for cross-VNet access):
+
+```bash
+az network private-dns link vnet list \
+  --resource-group <resource-group> \
+  --zone-name privatelink.vaultcore.azure.net \
+  --query "[].virtualNetwork.id" -o tsv
+# Expected: both VNet resource IDs (eastus and westus)
+```
 
 ## Troubleshooting checklist
 

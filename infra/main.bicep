@@ -12,8 +12,8 @@ param regionA string = 'eastus'
 @description('Secondary Azure region for the west virtual network.')
 param regionB string = 'westus'
 
-@description('Default Azure location for the resource group and shared resources.')
-param defaultLocation string = 'westus3'
+@description('Default Azure location for the resource group and shared resources. Defaults to eastus, matching the primary paired region for the United States Power Platform geography.')
+param defaultLocation string = 'eastus'
 
 @description('Power Platform geography for the enterprise policy resource.')
 param ppEnvironmentGeography string = 'unitedstates'
