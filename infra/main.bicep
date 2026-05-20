@@ -21,6 +21,9 @@ param ppEnvironmentGeography string = 'unitedstates'
 @description('Tags applied to deployed resources.')
 param tags object = {}
 
+@description('Optional override for the resource group name. When non-empty this value is used instead of the computed "rg-{prefix}-{env}" pattern. Set in parameters for environment-specific naming (e.g., rg-pbinet-dev-eastus).')
+param resourceGroupNameOverride string = ''
+
 @description('Deploy the Azure SQL resources.')
 param deploySql bool = true
 
@@ -35,7 +38,7 @@ param logAnalyticsRetentionDays int = 30
 @description('Enable Azure Monitor alert rules. Set true to activate alerts; false deploys only the action group stub.')
 param enableAlerts bool = false
 
-var resourceGroupName = 'rg-${prefix}-${env}'
+var resourceGroupName = empty(resourceGroupNameOverride) ? 'rg-${prefix}-${env}' : resourceGroupNameOverride
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName
@@ -56,6 +59,20 @@ module logAnalytics 'modules/logAnalytics.bicep' = {
   }
 }
 
+// Application Insights — workspace-based, linked to the LAW above.
+// Provides Power Platform telemetry correlation (Managed Environment → LAW).
+module appInsights 'modules/appInsights.bicep' = {
+  name: 'appi-${prefix}-${env}'
+  scope: rg
+  params: {
+    prefix: prefix
+    env: env
+    location: defaultLocation
+    tags: tags
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+  }
+}
+
 module network 'modules/network.bicep' = {
   name: 'network-${prefix}-${env}'
   scope: rg
@@ -65,6 +82,7 @@ module network 'modules/network.bicep' = {
     regionA: regionA
     regionB: regionB
     tags: tags
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
 }
 
@@ -98,6 +116,7 @@ module keyVault 'modules/keyvault.bicep' = {
     location: defaultLocation
     tags: tags
     uamiPrincipalId: managedIdentity.outputs.userAssignedIdentityPrincipalId
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
 }
 
@@ -112,6 +131,7 @@ module sql 'modules/sql.bicep' = if (deploySql) {
     uamiResourceId: managedIdentity.outputs.userAssignedIdentityResourceId
     uamiPrincipalId: managedIdentity.outputs.userAssignedIdentityPrincipalId
     uamiName: managedIdentity.outputs.userAssignedIdentityName
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
 }
 
@@ -124,6 +144,7 @@ module storage 'modules/storage.bicep' = if (deployStorage) {
     location: defaultLocation
     tags: tags
     uamiPrincipalId: managedIdentity.outputs.userAssignedIdentityPrincipalId
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
 }
 
@@ -183,138 +204,11 @@ module enterprisePolicy 'modules/enterprise-policy.bicep' = {
   }
 }
 
-// Diagnostic settings
-// Key Vault — AuditEvent is the primary signal: every authenticated KV operation
-// records caller identity, source IP, operation name, and result. A source IP in the
-// delegated-subnet range confirms Power Platform reached KV over the private endpoint.
-module diagKv 'modules/diagnosticSettings.bicep' = {
-  name: 'diag-kv-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: keyVault.outputs.keyVaultId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-kv'
-    logs: [
-      { category: 'AuditEvent',                  enabled: true }
-      { category: 'AzurePolicyEvaluationDetails', enabled: true }
-    ]
-    metrics: [
-      { category: 'AllMetrics', enabled: true }
-    ]
-  }
-}
-
-// Storage account blob service — diagnostics target the blobServices child resource.
-module diagBlob 'modules/diagnosticSettings.bicep' = if (deployStorage) {
-  name: 'diag-blob-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: '${storage!.outputs.storageAccountId}/blobServices/default'
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-blob'
-    logs: [
-      { category: 'StorageRead',   enabled: true }
-      { category: 'StorageWrite',  enabled: true }
-      { category: 'StorageDelete', enabled: true }
-    ]
-    metrics: [
-      { category: 'Transaction', enabled: true }
-    ]
-  }
-}
-
-// Azure SQL Database — diagnostics on the database resource (not the server).
-module diagSqlDb 'modules/diagnosticSettings.bicep' = if (deploySql) {
-  name: 'diag-sqldb-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: sql!.outputs.sqlDatabaseId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-sqldb'
-    logs: [
-      { category: 'SQLSecurityAuditEvents',  enabled: true }
-      { category: 'Errors',                  enabled: true }
-      { category: 'Timeouts',                enabled: true }
-    ]
-    metrics: [
-      { category: 'Basic',                   enabled: true }
-      { category: 'InstanceAndAppAdvanced',  enabled: true }
-    ]
-  }
-}
-
-// Private endpoints — metrics only (no log categories exist for PE resources).
-// PEBytesIn/Out and PEConnectionsConnected are the key health signals.
-module diagPeKv 'modules/diagnosticSettings.bicep' = {
-  name: 'diag-pe-kv-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: keyVaultPrivateEndpoint.outputs.privateEndpointId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-pe-kv'
-    logs: []
-    metrics: [
-      { category: 'AllMetrics', enabled: true }
-    ]
-  }
-}
-
-module diagPeSql 'modules/diagnosticSettings.bicep' = if (deploySql) {
-  name: 'diag-pe-sql-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: sqlPrivateEndpoint!.outputs.privateEndpointId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-pe-sql'
-    logs: []
-    metrics: [
-      { category: 'AllMetrics', enabled: true }
-    ]
-  }
-}
-
-module diagPeBlob 'modules/diagnosticSettings.bicep' = if (deployStorage) {
-  name: 'diag-pe-blob-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: storagePrivateEndpoint!.outputs.privateEndpointId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-pe-blob'
-    logs: []
-    metrics: [
-      { category: 'AllMetrics', enabled: true }
-    ]
-  }
-}
-
-// VNet diagnostics — AllMetrics covers VMProtectionAlerts and byte counters.
-module diagVnetEast 'modules/diagnosticSettings.bicep' = {
-  name: 'diag-vnet-east-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: network.outputs.vnetEastId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-vnet-east'
-    logs: []
-    metrics: [
-      { category: 'AllMetrics', enabled: true }
-    ]
-  }
-}
-
-module diagVnetWest 'modules/diagnosticSettings.bicep' = {
-  name: 'diag-vnet-west-${prefix}-${env}'
-  scope: rg
-  params: {
-    targetResourceId: network.outputs.vnetWestId
-    workspaceId: logAnalytics.outputs.workspaceId
-    settingName: 'diag-vnet-west'
-    logs: []
-    metrics: [
-      { category: 'AllMetrics', enabled: true }
-    ]
-  }
-}
+// Diagnostic settings are now co-located in each resource module (keyvault, storage, sql,
+// network, private-endpoint). Passing logAnalyticsWorkspaceId to each module activates
+// them inline, using typed 'existing' scope references — the correct Bicep pattern.
+// (The generic diagnosticSettings.bicep/inner-json approach fails because Bicep escapes
+// '[' → '[[' in object-literal strings, preventing ARM expression evaluation at runtime.)
 
 // Alerts module — action group always deployed; alert rules conditioned on enableAlerts.
 module alerts 'modules/alerts.bicep' = {
@@ -347,3 +241,6 @@ output vnetWestId string = network.outputs.vnetWestId
 // Canonical LAW output names — referenced by Niobe (docs/monitoring.md) and Tank (App Insights).
 output logAnalyticsWorkspaceName string = logAnalytics.outputs.workspaceName
 output logAnalyticsWorkspaceId string = logAnalytics.outputs.workspaceId
+// App Insights outputs — consumed by scripts/02-configure-pp-vnet.ps1 for PP Managed Environment binding.
+output appInsightsName string = appInsights.outputs.appInsightsName
+output appInsightsConnectionString string = appInsights.outputs.appInsightsConnectionString

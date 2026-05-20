@@ -13,6 +13,9 @@ param regionB string
 @description('Tags applied to deployed resources.')
 param tags object
 
+@description('Optional. Resource ID of the Log Analytics workspace for VNet diagnostic settings. Leave empty to skip.')
+param logAnalyticsWorkspaceId string = ''
+
 var eastVnetName = 'vnet-${prefix}-${env}-east'
 var westVnetName = 'vnet-${prefix}-${env}-west'
 var delegatedSubnetName = 'snet-pp-delegated'
@@ -124,3 +127,28 @@ output subnetEastDelegatedId string = resourceId('Microsoft.Network/virtualNetwo
 output subnetWestDelegatedId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetWest.name, delegatedSubnetName)
 output subnetEastPepId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetEast.name, privateEndpointSubnetName)
 output subnetWestPepId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetWest.name, privateEndpointSubnetName)
+
+// VNet diagnostics — AllMetrics covers VMProtectionAlerts and byte counters.
+resource vnetEastDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
+  name: 'diag-vnet-east'
+  scope: vnetEast
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: []
+    metrics: [
+      { category: 'AllMetrics', enabled: true }
+    ]
+  }
+}
+
+resource vnetWestDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
+  name: 'diag-vnet-west'
+  scope: vnetWest
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: []
+    metrics: [
+      { category: 'AllMetrics', enabled: true }
+    ]
+  }
+}

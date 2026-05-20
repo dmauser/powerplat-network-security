@@ -13,6 +13,9 @@ param tags object
 @description('Principal ID of the user-assigned managed identity granted blob reader access.')
 param uamiPrincipalId string
 
+@description('Optional. Resource ID of the Log Analytics workspace for diagnostic settings. Leave empty to skip.')
+param logAnalyticsWorkspaceId string = ''
+
 var storageBlobDataReaderRoleDefinitionId = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 var storageAccountName = toLower(take('st${prefix}${env}${uniqueString(resourceGroup().id)}', 24))
 
@@ -64,3 +67,20 @@ resource storageBlobDataReaderAssignment 'Microsoft.Authorization/roleAssignment
 output storageAccountName string = storageAccount.name
 output storageAccountId string = storageAccount.id
 output blobEndpoint string = storageAccount.properties.primaryEndpoints.blob
+
+// Diagnostic settings on the blob service child resource (required for storage read/write/delete logs).
+resource blobDiagSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
+  name: 'diag-blob'
+  scope: blobService
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      { category: 'StorageRead',   enabled: true }
+      { category: 'StorageWrite',  enabled: true }
+      { category: 'StorageDelete', enabled: true }
+    ]
+    metrics: [
+      { category: 'Transaction', enabled: true }
+    ]
+  }
+}

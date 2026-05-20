@@ -37,6 +37,13 @@ param metrics array = []
 
 // Nested ARM deployment so the diagnostic setting can be created for an arbitrary
 // resource type without Bicep needing to know the type at compile time.
+//
+// IMPORTANT: The inner template is loaded from a separate JSON file via loadJsonContent().
+// This is required because Bicep auto-escapes '[' to '[[' in Bicep object-literal strings,
+// which prevents ARM from evaluating '[parameters(...)]' expressions inside the nested
+// template. Loading from a raw JSON file bypasses Bicep's escaping so ARM correctly
+// evaluates the scope/name/property expressions at deploy time.
+//
 // The no-deployments-resources lint rule is suppressed here because this is the
 // only Bicep-native pattern for attaching an extension resource (diagnosticSettings)
 // to a dynamically-scoped target without statically declaring the target's resource type.
@@ -55,30 +62,7 @@ resource innerDeployment 'Microsoft.Resources/deployments@2022-09-01' = {
       logs:             { value: logs }
       metrics:          { value: metrics }
     }
-    template: {
-      '$schema': 'https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#'
-      contentVersion: '1.0.0.0'
-      parameters: {
-        targetResourceId: { type: 'string' }
-        workspaceId:      { type: 'string' }
-        settingName:      { type: 'string' }
-        logs:             { type: 'array' }
-        metrics:          { type: 'array' }
-      }
-      resources: [
-        {
-          type: 'Microsoft.Insights/diagnosticSettings'
-          apiVersion: '2021-05-01-preview'
-          // scope accepts a full resource ID string in ARM JSON — evaluated at deploy time.
-          scope: '[parameters(\'targetResourceId\')]'
-          name:  '[parameters(\'settingName\')]'
-          properties: {
-            workspaceId: '[parameters(\'workspaceId\')]'
-            logs:        '[parameters(\'logs\')]'
-            metrics:     '[parameters(\'metrics\')]'
-          }
-        }
-      ]
-    }
+    // loadJsonContent() passes the template as raw JSON without Bicep expression escaping.
+    template: loadJsonContent('diagnosticSettings-inner.json')
   }
 }

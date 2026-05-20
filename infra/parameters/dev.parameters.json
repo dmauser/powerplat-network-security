@@ -32,6 +32,9 @@
     "enableAlerts": {
       "value": false
     },
+    "resourceGroupNameOverride": {
+      "value": "rg-pbinet-dev-eastus"
+    },
     "tags": {
       "value": {
         "env": "dev",

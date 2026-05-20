@@ -23,3 +23,14 @@
 **Repo review sweep completed.** All 5 agents delivered findings, fixes, and decisions. See `.squad/decisions.md` for the complete merged decision set. Orchestration logs created at `.squad/orchestration-log/2026-05-20T18-55-18Z-*.md` and team session log at `.squad/log/2026-05-20T18-55-18Z-repo-review-sweep.md`. Your bicep validation successes are confirmed; line-ending fixes applied. Follow-ups pending: westus3 location justification, AzureServices bypass testing, provider registration ownership.
 
 - **2026-05-20T15:50:00-05:00 — Monitoring trio coordination complete.** LAW + diagnostic settings wired to Key Vault, SQL Database, Storage blob, 3x Private Endpoints, and 2x VNets; canonical outputs (`logAnalyticsWorkspaceName`, `logAnalyticsWorkspaceId`) delivered. Tank (App Insights binding) and Niobe (operator guide + KQL queries) both adopted the output names with zero conflicts. Alerts module opt-in by default prevents lab noise. See `.squad/orchestration-log/2026-05-20T15-50-00Z-trinity-2.md` and `.squad/decisions.md` Monitoring section for details. All Bicep clean (build + lint pass 0).
+
+- **2026-05-20T17:10:48-05:00 — Phase 1 Azure plane deployed to rg-pbinet-dev-eastus.** Deployment `pp-vnet-kv-demo-202605201710` succeeded on subscription `43d55e51`. 22 resources deployed (SQL skipped — East US capacity constraint). Outputs written to `.azure/last-deploy-outputs.json` including snet-pp-delegated subnet IDs for Tank's Phase 2. Decision inbox: `.squad/decisions/inbox/trinity-deploy-2026-05-20.md`.
+
+  IaC bugs found and fixed:
+
+  - **Bicep `[` → `[[` escaping (critical):** Bicep double-escapes `[` in all object-literal strings and `loadJsonContent()` variables, making ARM expressions into literal strings at runtime. The generic `diagnosticSettings.bicep` nested-ARM approach is broken for Bicep v0.42.x. Fix: use typed `resource` declarations with `scope:` per module.
+  - **VNet link `location: 'global'` required:** `Microsoft.Network/privateDnsZones/virtualNetworkLinks` needs explicit `location: 'global'` — does NOT inherit from parent zone.
+  - **PE diagnostic settings not supported:** `microsoft.network/privateendpoints` returns `ResourceTypeNotSupported`. Monitor PEs via Azure Monitor Metrics (PEConnectionsConnected) directly.
+  - **East US SQL capacity:** `RegionDoesNotAllowProvisioning` at deploy time. Use `deploySql=true` when capacity is available or add `sqlLocation` param to target `eastus2`.
+  - **Subscription context drift:** sync/async PowerShell shells can have different active subscriptions. Always `az account show` per shell. Fix: `az account set --subscription`.
+  - **App Insights unwired:** `infra/modules/appInsights.bicep` existed but was never called from `main.bicep`. Wired in this session.

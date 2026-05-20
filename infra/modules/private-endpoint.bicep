@@ -59,3 +59,6 @@ resource privateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneG
 
 output privateEndpointId string = privateEndpoint.id
 output privateEndpointName string = privateEndpoint.name
+// Note: Microsoft.Network/privateEndpoints does not support Microsoft.Insights/diagnosticSettings.
+// PE health is monitored via Azure Monitor metrics (PEConnectionsConnected, PEBytesIn/Out)
+// accessible directly through the Azure portal Metrics blade — no diag setting needed.

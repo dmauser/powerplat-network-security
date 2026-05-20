@@ -16,6 +16,9 @@ param tenantId string = subscription().tenantId
 @description('Principal ID of the user-assigned managed identity granted access to Key Vault secrets.')
 param uamiPrincipalId string
 
+@description('Optional. Resource ID of the Log Analytics workspace for diagnostic settings. Leave empty to skip.')
+param logAnalyticsWorkspaceId string = ''
+
 var keyVaultSecretsUserRoleDefinitionId = '4633458b-17de-408a-b874-0445c86b69e6'
 var keyVaultName = take('kv-${prefix}-${env}-${uniqueString(resourceGroup().id)}', 24)
 
@@ -77,3 +80,20 @@ resource keyVaultSecretsUserRoleAssignment 'Microsoft.Authorization/roleAssignme
 output keyVaultName string = keyVault.name
 output keyVaultUri string = keyVault.properties.vaultUri
 output keyVaultId string = keyVault.id
+
+// Diagnostic settings — AuditEvent is the primary signal for private-endpoint path confirmation
+// (caller identity + source IP confirm Power Platform reached KV over the delegated subnet).
+resource kvDiagSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
+  name: 'diag-kv'
+  scope: keyVault
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      { category: 'AuditEvent',                  enabled: true }
+      { category: 'AzurePolicyEvaluationDetails', enabled: true }
+    ]
+    metrics: [
+      { category: 'AllMetrics', enabled: true }
+    ]
+  }
+}

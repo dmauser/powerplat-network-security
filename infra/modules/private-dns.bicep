@@ -19,6 +19,7 @@ resource keyVaultZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 resource keyVaultZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   name: eastLinkName
   parent: keyVaultZone
+  location: 'global'
   properties: {
     registrationEnabled: false
     virtualNetwork: {
@@ -30,6 +31,7 @@ resource keyVaultZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkL
 resource keyVaultZoneWestLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   name: westLinkName
   parent: keyVaultZone
+  location: 'global'
   properties: {
     registrationEnabled: false
     virtualNetwork: {
@@ -48,6 +50,7 @@ resource sqlZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 resource sqlZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   name: eastLinkName
   parent: sqlZone
+  location: 'global'
   properties: {
     registrationEnabled: false
     virtualNetwork: {
@@ -59,6 +62,7 @@ resource sqlZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@
 resource sqlZoneWestLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   name: westLinkName
   parent: sqlZone
+  location: 'global'
   properties: {
     registrationEnabled: false
     virtualNetwork: {
@@ -77,6 +81,7 @@ resource blobZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 resource blobZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   name: eastLinkName
   parent: blobZone
+  location: 'global'
   properties: {
     registrationEnabled: false
     virtualNetwork: {
@@ -88,6 +93,7 @@ resource blobZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks
 resource blobZoneWestLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   name: westLinkName
   parent: blobZone
+  location: 'global'
   properties: {
     registrationEnabled: false
     virtualNetwork: {
