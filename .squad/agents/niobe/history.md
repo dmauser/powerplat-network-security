@@ -37,6 +37,10 @@
 
 - 2026-05-20T13:55:18-05:00 — Full repo docs audit passed: all 13 files comply with GitHub-flavored Markdown, summary + contents + body structure, ATX headings, proper code fences with language tags, all 182 links verified, no broken links after fixes.
 - 2026-05-20T13:55:18-05:00 — Archive directory is referenced but does NOT exist; requires team decision (create, remove, or clarify as future).
+- 2026-05-20T14:17:03-05:00 — Merged Neo's demo-script test steps into all 4 connector docs under "## Testing the private path" sections with public/private deny/allow probe validation patterns.
+- 2026-05-20T14:17:03-05:00 — Archive directory decision: git history empty (no commits), removed all 2 archive references from README.md and copilot-instructions.md per option (a).
+- 2026-05-20T14:17:03-05:00 — Cleaned up assets/architecture-diagram.mmd: removed hard-coded "rg-pbinet-dev" resource group name, replaced with generic "Azure subscription" placeholder.
+- 2026-05-20T14:17:03-05:00 — Connector doc structure now standardized: summary → contents → overview → before-you-start → build/create → expected-result → **testing-the-private-path** → troubleshooting/notes → learn-more. Reusable template emerged.
 
 ## Team Update — 2026-05-20T18:55:18Z
 

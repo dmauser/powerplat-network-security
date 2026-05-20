@@ -1,7 +1,7 @@
 # Squad Decisions
 
-**Last Updated:** 2026-05-20T13:55:18-05:00  
-**Source:** Repo review sweep merge of 14 inbox decisions
+**Last Updated:** 2026-05-20T14:17:03-05:00  
+**Source:** Repo review sweep follow-up completion — all 5 outstanding items resolved
 
 ## Architecture & Scope
 
@@ -23,31 +23,30 @@
 
 ## Infrastructure Findings (Morpheus, Trinity)
 
-### 🟡 Shared-Resource Location Drift
+### 🟢 Shared-Resource Location Drift (RESOLVED)
 
-**Finding:** `infra/main.bicep` defaults shared resources (RG, Key Vault, Storage, SQL) to `westus3`, while VNets stay at `eastus+westus`.
+**Finding:** `infra/main.bicep` defaults shared resources to `westus3`, contradicting the `eastus+westus` paired-region narrative.
 
-**Owner:** Trinity
+**Resolution (Trinity):** Changed `defaultLocation` from `westus3` to `eastus`.
+- **Rationale:** `westus3` had no documented justification (no quota, feature, or architecture requirement). It was a footgun for operators accepting defaults. Aligning to `eastus` makes the IaC self-documenting and consistent with docs narrative.
+- **Files modified:** `infra/main.bicep`, `infra/parameters/dev.parameters.json`, `docs/architecture.md`, `README.md`.
+- **Verification:** `az bicep build` and `az bicep lint` both pass clean; `grep -ri "westus3" infra/ docs/ README.md` returns zero matches.
 
-**Follow-up:**
-- Align `defaultLocation` to paired region, OR
-- Codify and justify why shared services live outside paired network regions.
+### 🟢 Key Vault and Storage Bypass Settings (RESOLVED)
 
-### 🟡 Key Vault and Storage Bypass Settings
+**Finding:** Both modules declared `networkAcls.bypass = 'AzureServices'` despite `publicNetworkAccess = 'Disabled'`.
 
-**Finding:** `infra/modules/keyvault.bicep` and `infra/modules/storage.bicep` declare `networkAcls.bypass = 'AzureServices'` despite disabling public network access.
+**Resolution (Trinity):** Changed `bypass` to `'None'` on both Key Vault and Storage.
+- **Rationale:** The `bypass` property is a public-endpoint firewall setting. With public access disabled, the bypass is functionally inert and creates confusion about trusted exception paths that don't actually exist. Setting `'None'` explicitly signals defense-in-depth intent. No Microsoft Learn documentation requires `AzureServices` bypass for Power Platform VNet support with public access disabled; all runtime traffic flows through delegated subnet → private endpoint path.
+- **Caveat:** If public access is ever re-enabled (e.g., break-glass tooling), this decision must be revisited.
+- **Files modified:** `infra/modules/keyvault.bicep`, `infra/modules/storage.bicep`, `docs/security-notes.md` (with inline rationale in modules; updated security doc).
+- **Verification:** `az bicep build` and `az bicep lint` both pass clean.
 
-**Owner:** Trinity
+### 🟢 Bicep Validation & Compliance
 
-**Follow-up:**
-- Test whether bypass can be removed cleanly.
-- If not removable, document exact product requirement.
+**Status:** `bicep build` and `bicep lint` pass for all modules after region and bypass fixes.
 
-### 🟢 Bicep Validation
-
-**Status:** `bicep build` and `bicep lint` pass for `infra/main.bicep` and all modules.
-
-**Verified by:** Trinity
+**Verified by:** Trinity (2026-05-20T14:17:03-05:00)
 
 ---
 
@@ -109,30 +108,41 @@
 1. Missing Contents section in README.md — FIXED
 2. Broken link to `archive/` — See decision below
 
-**Connector verification steps needed:** Neo dropped 4 merge-ready test-step files:
-- neo-tests-keyvault.md
-- neo-tests-sql.md
-- neo-tests-blob.md
-- neo-tests-custom-http.md
+**Connector verification steps (MERGED):** Niobe merged Neo's test probes into all 4 connector docs under "## Testing the private path" sections:
+- `docs/connectors/keyvault.md` — Added deny/allow probes and private DNS checks
+- `docs/connectors/sql.md` — Added deny/allow probes and private DNS checks
+- `docs/connectors/blob.md` — Added deny/allow probes and private DNS checks
+- `docs/connectors/custom-http.md` — Added deny/allow probes and private DNS checks
+- All now follow standardized connector-walkthrough template: summary → contents → overview → before-start → build/create → expected-result → **testing-the-private-path** → notes/troubleshooting → learn-more.
 
 ---
 
 ## Directory & Content Decisions
 
-### 🟡 Archive Directory Status (Niobe decision, team input needed)
+### 🟢 Archive Directory Status (RESOLVED)
 
-**Problem:** `archive/` referenced in `.github/copilot-instructions.md` and `README.md` but does NOT exist.
+**Problem:** `archive/` referenced in docs but does NOT exist (zero git history).
 
-**Mitigation:** Updated `README.md` to plain text: "archive/ (read-only reference, planned)".
+**Decision (Niobe):** Option (a) — Remove all archive references.
 
-**Options:**
-1. **Create archive/** with legacy Fabric lab content (aligns with copilot instructions).
-2. **Remove archive references** entirely (if legacy lab not relevant).
-3. **Update docs** to clarify archive is future enhancement.
+**Rationale:** 
+- No legacy content to preserve (confirmed via `git log --all -- archive/`)
+- No future use case documented
+- Broken links are a docs hygiene violation
+- Clean slate aligns with "active content at repo root" principle
 
-**Recommendation:** Option 1 (create archive) aligns with stated intent.
+**Action Taken:**
+- Removed archive references from `README.md` (removed line + table row)
+- Removed archive references from `.github/copilot-instructions.md`
+- Result: 0 broken links pointing to archive/ (or any non-existent resource)
 
-**Awaiting:** Morpheus or Tank to provide legacy content files.
+### 🟢 Architecture Diagram Cleanup (RESOLVED)
+
+**Finding (Niobe):** `assets/architecture-diagram.mmd` hard-coded resource group name `rg-pbinet-dev`.
+
+**Action Taken:** Replaced with generic placeholder `"Azure subscription"` to align with convention of using deploy-output placeholders instead of hard-coded values.
+
+**Validation:** Mermaid syntax confirmed valid; no broken brackets or flowchart references.
 
 ---
 

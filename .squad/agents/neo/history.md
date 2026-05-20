@@ -15,6 +15,6 @@
 - Updated `docs/demo-script.md` to separate workstation denial probes from Managed Environment allow-path proofs, with dated runnable commands and connector-specific expected results.
 - Connector guides still need richer verification prose, so validator-authored test steps were written to `.squad/decisions/inbox/` for Niobe to merge instead of editing her docs directly.
 
-## Team Update — 2026-05-20T18:55:18Z
+## Team Update — 2026-05-20T19:17:03Z
 
-**Repo review sweep completed.** All 5 agents delivered findings, fixes, and decisions. See `.squad/decisions.md` for the complete merged decision set. Orchestration logs created at `.squad/orchestration-log/2026-05-20T18-55-18Z-*.md` and team session log at `.squad/log/2026-05-20T18-55-18Z-repo-review-sweep.md`. Your network validation rewrite and demo script improvements completed. Follow-ups pending: validation script parameterization for enterprise policy + DNS zone checks, connector test-step merge with Niobe.
+**Follow-up sweep completed.** Trinity resolved westus3 + AzureServices flags by changing `defaultLocation` to eastus and setting `bypass = 'None'` on Key Vault/Storage modules (see `.squad/orchestration-log/2026-05-20T19-17-03Z-trinity.md`). Niobe merged connector test steps, removed archive references, and cleaned diagram (see `.squad/orchestration-log/2026-05-20T19-17-03Z-niobe.md`). All 5 outstanding items now resolved; decisions merged into `.squad/decisions.md`. See `.squad/log/2026-05-20T19-17-03Z-followup-sweep.md` for round summary.
