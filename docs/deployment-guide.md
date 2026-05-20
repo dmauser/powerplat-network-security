@@ -135,6 +135,8 @@ After `03-validate-network.sh`:
 
 If SQL connectivity is slow on first use, note the expected [serverless cold start behavior](./troubleshooting.md#sql-serverless-first-call-cold-start-30s-wake).
 
+After validation passes, proceed to [monitoring.md](./monitoring.md) to confirm telemetry is flowing correctly before testing connector flows.
+
 ## Step 5: build connector flows
 
 Use the deployment outputs to create and test flows from inside the Managed Environment.

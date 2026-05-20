@@ -99,6 +99,10 @@ az network private-dns link vnet list \
 # Expected: both VNet resource IDs (eastus and westus)
 ```
 
+### Verify via telemetry
+
+After confirming DNS and network plumbing, check the Key Vault audit logs to see the successful `SecretGet` operation logged with the correct private IP. See [monitoring.md → query (a)](../monitoring.md#query-a-is-power-platform-reaching-key-vault-over-the-private-endpoint) for the KQL query and expected log format.
+
 ## Troubleshooting checklist
 
 If you still see `403 Forbidden` even in the Managed Environment, check the following in order:

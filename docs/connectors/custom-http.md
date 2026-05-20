@@ -124,15 +124,9 @@ The custom connector resolves `<keyVaultName>.vault.azure.net` to this private I
 
 ### Monitor the custom connector call
 
-After running the custom connector in the Managed Environment, check Key Vault diagnostic logs to see that the request came from a private IP (the delegated subnet CIDR range):
+After running the custom connector in the Managed Environment, check Key Vault diagnostic logs to see that the request came from a private IP (the delegated subnet CIDR range). See [monitoring.md → query (a)](../monitoring.md#query-a-is-power-platform-reaching-key-vault-over-the-private-endpoint) for a complete KQL query that shows all successful Key Vault access from the delegated subnets.
 
-```bash
-az monitor log-analytics query \
-  --workspace <workspace-id> \
-  --analytics-query "AzureDiagnostics | where ResourceProvider == 'MICROSOFT.KEYVAULT' | where OperationName == 'SecretGet' | order by TimeGenerated desc | limit 1"
-```
-
-The source IP should be within your VNet address space (e.g., `10.10.x.x` or `10.20.x.x`), not a public Azure datacenter IP.
+The source IP should be within your VNet address space (e.g., `10.10.0.0/27` or `10.20.0.0/27`), not a public Azure datacenter IP.
 
 ## Why this matters
 

@@ -16,7 +16,7 @@ This lab documents a Power Platform virtual network support demo that mirrors th
 
 ## Overview
 
-The lab reproduces the role split and network shape shown in the Microsoft Learn setup guidance for [virtual network support for Power Platform](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-setup-configure). An Azure admin creates the Azure network and private endpoint resources, a Power Platform admin links a Managed Environment to the enterprise policy, and a maker builds flows that use private connectivity through supported connectors such as [Azure Key Vault](https://learn.microsoft.com/en-us/connectors/keyvault/), [SQL Server](https://learn.microsoft.com/en-us/connectors/sql/), [Azure Blob Storage](https://learn.microsoft.com/en-us/connectors/azureblob/), and a custom connector.
+The lab reproduces the role split and network shape shown in the Microsoft Learn setup guidance for [virtual network support for Power Platform](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-setup-configure). An Azure admin creates the Azure network and private endpoint resources, a Power Platform admin links a Managed Environment to the enterprise policy, and a maker builds flows that use private connectivity through supported connectors such as [Azure Key Vault](https://learn.microsoft.com/en-us/connectors/keyvault/), [SQL Server](https://learn.microsoft.com/en-us/connectors/sql/), [Azure Blob Storage](https://learn.microsoft.com/en-us/connectors/azureblob/), and a custom connector. Telemetry infrastructure enables operators to verify traffic flows through the private path—see [monitoring.md](./monitoring.md) for setup and query guidance.
 
 ## Roles and responsibilities
 

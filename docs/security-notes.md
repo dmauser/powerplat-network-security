@@ -72,12 +72,16 @@ For the Key Vault demo and any production follow-on:
 
 ## Logging and auditing
 
-For the lab, lightweight diagnostics are enough to prove the private path:
+For the lab, comprehensive diagnostics prove the private path and catch public access attempts. The deployment provisions diagnostic settings for Key Vault (`AuditEvent`, `AzurePolicyEvaluationDetails`, `AllMetrics`), SQL (`Errors`, `Security`, `Timeouts`), Storage (`StorageRead/Write/Delete`), and private endpoints (`AllMetrics`), all flowing to a Log Analytics workspace.
 
-- Key Vault diagnostic logs or access logs.
-- NSG flow logs if you extend the network with NSGs.
-- Connector run history inside Power Automate.
+**Essential visibility:**
+- Key Vault audit events capture all secret/key access with caller IP and identity.
+- Denied public-endpoint attempts are logged with HTTP 403/401 and public IP source—see [monitoring.md](./monitoring.md) for queries.
+- NSG flow logs can be added later if you extend the network with NSGs.
+- Connector run history inside Power Automate shows client-side timing and error context.
 - A private-name-resolution check from inside the injected path, such as the Managed Environment runtime or a jump host in one of the VNets.
+
+See [monitoring.md](./monitoring.md) for full telemetry setup, KQL queries, and troubleshooting workflows.
 
 Be careful not to overstate what an external validation script proves. A public-side DNS lookup can confirm the Private Link CNAME chain and control-plane settings, but only an in-path test proves that the runtime resolved the service FQDN to the private endpoint IP.
 

@@ -26,6 +26,12 @@
     "deployStorage": {
       "value": true
     },
+    "logAnalyticsRetentionDays": {
+      "value": 30
+    },
+    "enableAlerts": {
+      "value": false
+    },
     "tags": {
       "value": {
         "env": "dev",

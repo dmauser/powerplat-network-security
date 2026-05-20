@@ -99,6 +99,10 @@ az network private-dns link vnet list \
 # Expected: both VNet resource IDs (eastus and westus)
 ```
 
+### Verify via telemetry
+
+Check the Storage account diagnostic logs (`StorageRead` / `StorageWrite` / `StorageDelete`) to confirm the successful read or write came from the private delegated subnet IP. See [monitoring.md](../monitoring.md) for structured telemetry queries to audit storage traffic patterns.
+
 ## Troubleshooting notes
 
 - If authentication fails, make sure you are using Microsoft Entra and RBAC, not SAS tokens or account keys.

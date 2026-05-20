@@ -88,6 +88,10 @@ az network private-dns link vnet list \
 
 Both VNets must be linked so that flows from either delegated subnet can resolve the private endpoint.
 
+### Verify via telemetry
+
+Check the SQL error and security logs to confirm the successful login and query execution came from the private delegated subnet IP. See [monitoring.md](../monitoring.md) for detailed telemetry queries on SQL access patterns.
+
 ## Notes
 
 - If the database is serverless, the first call can take around 30 seconds while the compute tier wakes up. See [troubleshooting.md](../troubleshooting.md#sql-serverless-first-call-cold-start-30s-wake).

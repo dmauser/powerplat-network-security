@@ -112,6 +112,7 @@ Mirrors the Microsoft Learn role diagram:
 - Managed Environment setup → [`docs/managed-environment-setup.md`](./docs/managed-environment-setup.md)
 - 20-min demo script → [`docs/demo-script.md`](./docs/demo-script.md)
 - Connector how-tos → [`docs/connectors/`](./docs/connectors/)
+- Monitoring → [`docs/monitoring.md`](./docs/monitoring.md)
 - Troubleshooting → [`docs/troubleshooting.md`](./docs/troubleshooting.md)
 - Cost control → [`docs/cost-control.md`](./docs/cost-control.md)
 - Security notes → [`docs/security-notes.md`](./docs/security-notes.md)

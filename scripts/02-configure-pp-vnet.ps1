@@ -249,6 +249,12 @@ try {
         throw "Deployment output enterprisePolicyArmId does not look like a Microsoft.PowerPlatform enterprise policy ARM ID: $policyArmId"
     }
 
+    # Read optional Application Insights outputs from Bicep deploy (set when deployMonitoring=true).
+    # If absent, the AI binding step is skipped with a warning.
+    $appInsightsResourceId = [string]$deployOutputs.appInsightsResourceId.value
+    $appInsightsConnectionString = [string]$deployOutputs.appInsightsConnectionString.value
+    $appInsightsInstrumentationKey = [string]$deployOutputs.appInsightsInstrumentationKey.value
+
     Install-EnterprisePoliciesModule -RequiredVersion $EnterprisePoliciesModuleVersion
 
     $regionCommand = Get-Command -Name 'Get-EnvironmentRegion' -ErrorAction Stop
@@ -306,6 +312,86 @@ try {
     Write-Host "Environment ID            : $EnvironmentId"
     Write-Host "Tenant ID                 : $TenantId"
     Write-Host "Enterprise policy ARM ID  : $policyArmId"
+
+    # ---------------------------------------------------------------------------
+    # Application Insights binding
+    #
+    # Set-AdminPowerAppEnvironmentApplicationInsights does not exist in
+    # Microsoft.PowerPlatform.EnterprisePolicies v0.17.0 or
+    # Microsoft.PowerApps.Administration.PowerShell. Fall back to the
+    # Power Platform admin REST API.
+    #
+    # API: PATCH https://api.bap.microsoft.com/providers/
+    #        Microsoft.BusinessAppPlatform/scopes/admin/environments/{id}
+    #      ?api-version=2023-06-01
+    # Body: { "properties": { "applicationInsightsId": "...",
+    #                          "applicationInsightsKey": "<connectionString>" } }
+    #
+    # Reference: https://learn.microsoft.com/en-us/power-platform/admin/app-insights-overview
+    # ---------------------------------------------------------------------------
+
+    if ([string]::IsNullOrWhiteSpace($appInsightsResourceId)) {
+        Write-Host ''
+        Write-Host 'Application Insights outputs not found in deploy outputs — skipping AI binding.' -ForegroundColor Yellow
+        Write-Host '  Deploy with deployMonitoring=true (and logAnalyticsWorkspaceId set) to enable.'
+    }
+    else {
+        Write-Host ''
+        Write-Host "Configuring Application Insights binding for environment $EnvironmentId ..."
+        Write-Host "  App Insights resource ID : $appInsightsResourceId"
+
+        # Acquire a Power Apps bearer token using the current Azure CLI session.
+        $ppTokenResult = az account get-access-token --resource 'https://service.powerapps.com/' --output json 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($ppTokenResult)) {
+            throw 'Unable to acquire a Power Apps bearer token. Ensure az login is complete and the account has PP admin rights.'
+        }
+        $ppToken = ($ppTokenResult | ConvertFrom-Json).accessToken
+
+        $bapBase = 'https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments'
+        $apiVersion = '2023-06-01'
+        $envUri = "$bapBase/$([Uri]::EscapeDataString($EnvironmentId))?api-version=$apiVersion"
+
+        $headers = @{
+            Authorization  = "Bearer $ppToken"
+            'Content-Type' = 'application/json'
+        }
+
+        # Read current binding for idempotency check.
+        $currentEnv = Invoke-RestMethod -Uri $envUri -Method Get -Headers $headers -ErrorAction Stop
+        $currentAiId = [string]$currentEnv.properties.applicationInsightsId
+
+        if ($currentAiId -ieq $appInsightsResourceId) {
+            Write-Host '  Application Insights already bound to this resource — no change applied.' -ForegroundColor Yellow
+        }
+        else {
+            if (-not [string]::IsNullOrWhiteSpace($currentAiId)) {
+                Write-Host "  Replacing existing AI binding: $currentAiId"
+            }
+
+            # Use connection string as the key value (modern PP telemetry pipeline).
+            # The 'applicationInsightsKey' field accepts either the instrumentation key
+            # (legacy) or the full connection string. The connection string is preferred
+            # for workspace-based App Insights.
+            $aiKeyValue = if (-not [string]::IsNullOrWhiteSpace($appInsightsConnectionString)) {
+                $appInsightsConnectionString
+            } else {
+                $appInsightsInstrumentationKey
+            }
+
+            $patchBody = @{
+                properties = @{
+                    applicationInsightsId  = $appInsightsResourceId
+                    applicationInsightsKey = $aiKeyValue
+                }
+            } | ConvertTo-Json -Depth 5 -Compress
+
+            $null = Invoke-RestMethod -Uri $envUri -Method Patch -Headers $headers -Body $patchBody -ErrorAction Stop
+
+            Write-Host '  Application Insights bound successfully.' -ForegroundColor Green
+            Write-Host "  Resource ID : $appInsightsResourceId"
+        }
+    }
+
     Show-NextSteps
 }
 catch {
