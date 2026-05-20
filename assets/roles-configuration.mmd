@@ -1,0 +1,35 @@
+%% Mirrors the role/configuration layout from
+%% https://learn.microsoft.com/en-us/power-platform/admin/media/vnet-support/vnet-support-configurations.png
+flowchart LR
+    subgraph AzAdmin["Azure admin (Network Contributor)"]
+        A1[Create VNets in paired regions]
+        A2[Delegate subnet to<br/>Microsoft.PowerPlatform/<br/>enterprisePolicies]
+        A3[Create enterprise policy<br/>kind = NetworkInjection]
+        A4[Create private endpoints<br/>+ private DNS zones]
+        A1 --> A2 --> A3
+        A1 --> A4
+    end
+
+    subgraph PPAdmin["Power Platform admin"]
+        P1[Provision Managed<br/>Environment in US geo]
+        P2[Enable-SubnetInjection<br/>policy → environment]
+        P1 --> P2
+    end
+
+    subgraph Maker["Maker"]
+        M1[Build flow with KV /<br/>SQL / Blob connectors]
+        M2[Or custom HTTP connector<br/>to KV REST API]
+    end
+
+    A3 -. ARM ID .-> P2
+    P2 -. Linked .-> M1
+    P2 -. Linked .-> M2
+    A4 -. Reached via .-> M1
+    A4 -. Reached via .-> M2
+
+    classDef azure fill:#e6f2ff,stroke:#0078d4,color:#000
+    classDef pp fill:#fef0e6,stroke:#d83b01,color:#000
+    classDef maker fill:#eef7e6,stroke:#107c10,color:#000
+    class A1,A2,A3,A4 azure
+    class P1,P2 pp
+    class M1,M2 maker

@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    actor Maker as Maker / Flow trigger
+    participant Flow as Power Automate flow<br/>(Managed Environment)
+    participant Subnet as snet-pp-delegated<br/>(VNet-East or VNet-West)
+    participant PDNS as Private DNS<br/>privatelink.vaultcore.azure.net
+    participant PE as Private Endpoint<br/>(snet-pep, VNet-East)
+    participant KV as Azure Key Vault<br/>publicNetworkAccess=Disabled
+    participant AAD as Microsoft Entra ID
+
+    Maker->>Flow: Run flow
+    Flow->>AAD: Acquire token (UAMI / SP)<br/>resource=https://vault.azure.net
+    AAD-->>Flow: access_token
+
+    Note over Flow,Subnet: VNet support routes the connector's<br/>outbound call through the delegated subnet
+    Flow->>Subnet: HTTPS GET <kv>.vault.azure.net<br/>/secrets/demo-secret?api-version=7.4
+
+    Subnet->>PDNS: Resolve <kv>.vault.azure.net
+    PDNS-->>Subnet: CNAME → <kv>.privatelink.vaultcore.azure.net<br/>A → 10.10.1.x (private)
+
+    Subnet->>PE: TCP 443 to private IP
+    PE->>KV: Forward via Private Link
+    KV->>KV: Check RBAC (Key Vault Secrets User)
+    KV-->>PE: 200 {value: "Hello from private Key Vault"}
+    PE-->>Subnet: 200
+    Subnet-->>Flow: 200
+    Flow-->>Maker: Secret value
+
+    Note over Flow,KV: Without VNet support OR without the<br/>private DNS link, this same call returns<br/>403 Forbidden — public access is disabled.

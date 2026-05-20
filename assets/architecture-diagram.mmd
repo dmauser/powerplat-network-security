@@ -1,0 +1,54 @@
+flowchart TB
+    subgraph Sub["Azure subscription — rg-pbinet-dev"]
+        subgraph East["VNet-East (eastus) 10.10.0.0/16"]
+            EDeleg["snet-pp-delegated /27<br/>delegated to<br/>Microsoft.PowerPlatform/<br/>enterprisePolicies"]
+            EPep["snet-pep /27<br/>privateEndpointNetworkPolicies: Disabled"]
+        end
+
+        subgraph West["VNet-West (westus) 10.20.0.0/16"]
+            WDeleg["snet-pp-delegated /27<br/>(delegated)"]
+            WPep["snet-pep /27"]
+        end
+
+        East <-. global peering .-> West
+
+        subgraph PEs["Private endpoints (in VNet-East / snet-pep)"]
+            KV[(Key Vault<br/>publicNetworkAccess=Disabled<br/>RBAC + purge protection)]
+            SQL[(Azure SQL DB<br/>Serverless GP<br/>AAD-only<br/>publicNetworkAccess=Disabled)]
+            ST[(Storage account<br/>Blob<br/>publicNetworkAccess=Disabled)]
+        end
+
+        subgraph DNS["Private DNS zones (linked to BOTH VNets)"]
+            Z1[privatelink.vaultcore.azure.net]
+            Z2[privatelink.database.windows.net]
+            Z3[privatelink.blob.core.windows.net]
+        end
+
+        EP{{"Microsoft.PowerPlatform/<br/>enterprisePolicies<br/>kind = NetworkInjection<br/>refs both delegated subnets"}}
+        UAMI[/User-assigned<br/>Managed Identity/]
+
+        EPep --- PEs
+        PEs -. registers A records .- DNS
+        EP --- EDeleg
+        EP --- WDeleg
+        UAMI -. RBAC .-> KV
+        UAMI -. AAD admin .-> SQL
+        UAMI -. RBAC .-> ST
+    end
+
+    subgraph PP["Power Platform tenant — US geography"]
+        ME["Managed Environment<br/>(US region)"]
+        Flow["Power Automate flow<br/>• Built-in KV connector<br/>• SQL Server connector<br/>• Azure Blob connector<br/>• Custom HTTP connector"]
+        ME --- Flow
+    end
+
+    EP == Enable-SubnetInjection ==> ME
+    Flow == egress via delegated subnet ==> EDeleg
+    Flow == egress via delegated subnet ==> WDeleg
+
+    classDef pe fill:#e6f2ff,stroke:#0078d4
+    classDef dns fill:#fef0e6,stroke:#d83b01
+    classDef pp fill:#eef7e6,stroke:#107c10
+    class KV,SQL,ST pe
+    class Z1,Z2,Z3 dns
+    class ME,Flow pp

@@ -1,0 +1,54 @@
+name: Bicep validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/bicep-validate.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/bicep-validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: bicep build + lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep
+          sudo mv bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: bicep build (main.bicep)
+        run: bicep build infra/main.bicep --outdir "$RUNNER_TEMP/bicep-out"
+
+      - name: bicep build (all modules)
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          for f in infra/modules/*.bicep; do
+            echo "Building $f"
+            bicep build "$f" --outdir "$RUNNER_TEMP/bicep-out"
+          done
+
+      - name: bicep lint (info+)
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in infra/main.bicep infra/modules/*.bicep; do
+            echo "Linting $f"
+            bicep lint "$f" || fail=1
+          done
+          exit $fail
