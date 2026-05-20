@@ -8,27 +8,29 @@ Reads the enterprise policy ARM ID from .azure/last-deploy-outputs.json, validat
 and enables subnet injection for the supplied Power Platform environment.
 
 .PARAMETER EnvironmentId
-Power Platform environment GUID.
+Power Platform environment ID.
 
 .PARAMETER TenantId
 Optional tenant ID. Defaults to the current Azure CLI tenant.
 
 .PARAMETER DeployOutputsPath
-Path to the deployment outputs JSON file. Default: .azure/last-deploy-outputs.json
+Optional path to the deployment outputs JSON file. Defaults to ..\.azure\last-deploy-outputs.json relative to this script.
 
 .PARAMETER ForceAuth
-Passes -ForceAuth to Enable-SubnetInjection when specified.
+Passes -ForceAuth to the Microsoft.PowerPlatform.EnterprisePolicies commands when specified.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrWhiteSpace()]
     [string]$EnvironmentId,
 
     [Parameter()]
+    [ValidateNotNullOrWhiteSpace()]
     [string]$TenantId,
 
     [Parameter()]
-    [string]$DeployOutputsPath = '.azure/last-deploy-outputs.json',
+    [string]$DeployOutputsPath,
 
     [Parameter()]
     [switch]$ForceAuth
@@ -37,41 +39,101 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$EnterprisePoliciesModuleVersion = '0.17.0'
+$AllowedRegionTokens = @('unitedstates', 'eastus', 'westus')
+$DefaultDeployOutputsPath = Join-Path -Path $PSScriptRoot -ChildPath '..\.azure\last-deploy-outputs.json'
+$ResolvedDeployOutputsPath = $DefaultDeployOutputsPath
+
 function Show-FixupSteps {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DeployOutputsFile
+    )
+
     Write-Host ''
     Write-Host 'Fix-up steps:' -ForegroundColor Yellow
     Write-Host '  1. Confirm Azure CLI is signed in: az login'
-    Write-Host '  2. Confirm the target Power Platform environment exists and the GUID is correct.'
-    Write-Host '  3. Confirm the environment region is United States for this preview scenario.'
-    Write-Host '  4. If module install/auth prompts were interrupted, rerun with -ForceAuth.'
-    Write-Host '  5. Make sure .azure/last-deploy-outputs.json exists from ./scripts/01-deploy.sh.'
+    Write-Host '  2. Confirm the target Power Platform environment exists and the environment ID is correct.'
+    Write-Host '  3. Confirm the environment is a Managed Environment in the United States geography.'
+    Write-Host '  4. Confirm ./scripts/01-deploy.sh already produced the deploy outputs file listed below.'
+    Write-Host "  5. If account selection or module install was interrupted, rerun this script with -ForceAuth."
+    Write-Host "  6. Expected deploy outputs path: $DeployOutputsFile"
 }
 
-function Install-RequiredModule {
+function Show-NextSteps {
+    Write-Host ''
+    Write-Host 'Next steps:' -ForegroundColor Cyan
+    Write-Host '  1. Run ./scripts/03-validate-network.sh'
+    Write-Host '  2. Test the connector walkthroughs in docs/connectors/keyvault.md, sql.md, blob.md, and custom-http.md'
+}
+
+function Assert-CommandAvailable {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name
     )
 
-    if (-not (Get-Module -ListAvailable -Name $Name)) {
-        Write-Host "Installing PowerShell module $Name..."
-        Install-Module -Name $Name -Force -Scope CurrentUser -AllowClobber
+    if (-not (Get-Command -Name $Name -ErrorAction SilentlyContinue)) {
+        throw "Required command '$Name' is not available in the current session."
+    }
+}
+
+function Install-EnterprisePoliciesModule {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RequiredVersion
+    )
+
+    $availableModule = Get-Module -ListAvailable -Name 'Microsoft.PowerPlatform.EnterprisePolicies' |
+        Where-Object { $_.Version -eq [version]$RequiredVersion } |
+        Select-Object -First 1
+
+    if (-not $availableModule) {
+        Write-Host "Installing Microsoft.PowerPlatform.EnterprisePolicies $RequiredVersion for the current user..."
+        Install-Module -Name 'Microsoft.PowerPlatform.EnterprisePolicies' -RequiredVersion $RequiredVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
     }
 
-    Import-Module -Name $Name -Force
+    Import-Module -Name 'Microsoft.PowerPlatform.EnterprisePolicies' -RequiredVersion $RequiredVersion -Force -ErrorAction Stop
+}
+
+function Get-ResolvedDeployOutputsPath {
+    param(
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [System.IO.Path]::GetFullPath($DefaultDeployOutputsPath)
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path -Path (Get-Location) -ChildPath $Path))
 }
 
 function Get-CurrentTenantId {
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-        throw 'Azure CLI (az) is required to resolve the current tenant ID.'
-    }
+    Assert-CommandAvailable -Name 'az'
 
     $currentTenantId = az account show --query tenantId -o tsv 2>$null
-    if (-not $currentTenantId) {
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($currentTenantId)) {
         throw 'Unable to resolve the current tenant ID. Run az login and retry.'
     }
 
     return $currentTenantId.Trim()
+}
+
+function Get-DeployOutputs {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Deployment outputs file not found: $Path"
+    }
+
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 }
 
 function Get-RegionText {
@@ -93,72 +155,161 @@ function Get-RegionText {
     return [string]$RegionResult
 }
 
+function Get-NormalizedRegionToken {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RegionText
+    )
+
+    return ($RegionText.ToLowerInvariant() -replace '[^a-z0-9]', '')
+}
+
+function Get-PolicyArmIdValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$InputObject
+    )
+
+    foreach ($propertyName in 'ResourceId', 'resourceId', 'Id', 'id') {
+        if ($InputObject.PSObject.Properties.Name -contains $propertyName) {
+            $value = [string]$InputObject.$propertyName
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return $value
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-EnterprisePoliciesCommandArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.CommandInfo]$Command,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Arguments
+    )
+
+    $supportedArguments = @{}
+    foreach ($entry in $Arguments.GetEnumerator()) {
+        if ($Command.Parameters.ContainsKey($entry.Key)) {
+            $supportedArguments[$entry.Key] = $entry.Value
+        }
+    }
+
+    return $supportedArguments
+}
+
+function Get-CurrentLinkedPolicyArmId {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EnvironmentId,
+        [Parameter(Mandatory = $true)]
+        [string]$TenantId,
+        [Parameter(Mandatory = $true)]
+        [bool]$UseForceAuth
+    )
+
+    $command = Get-Command -Name 'Get-SubnetInjectionEnterprisePolicy' -ErrorAction Stop
+    $commandArguments = Get-EnterprisePoliciesCommandArguments -Command $command -Arguments @{
+        EnvironmentId = $EnvironmentId
+        TenantId      = $TenantId
+        ForceAuth     = $UseForceAuth
+    }
+
+    try {
+        $currentPolicy = & $command @commandArguments
+    }
+    catch {
+        if ($_.Exception.Message -like 'No Subnet Injection Enterprise Policy is linked to environment:*') {
+            return $null
+        }
+
+        throw
+    }
+
+    return Get-PolicyArmIdValue -InputObject $currentPolicy
+}
+
 try {
-    if (-not $TenantId) {
+    Assert-CommandAvailable -Name 'az'
+
+    if (-not $PSBoundParameters.ContainsKey('TenantId')) {
         $TenantId = Get-CurrentTenantId
     }
 
-    if (-not (Test-Path -LiteralPath $DeployOutputsPath)) {
-        throw "Deployment outputs file not found: $DeployOutputsPath"
-    }
-
-    $deployOutputs = Get-Content -LiteralPath $DeployOutputsPath -Raw | ConvertFrom-Json
-    $policyArmId = $deployOutputs.enterprisePolicyArmId.value
-    if (-not $policyArmId) {
+    $ResolvedDeployOutputsPath = Get-ResolvedDeployOutputsPath -Path $DeployOutputsPath
+    $deployOutputs = Get-DeployOutputs -Path $ResolvedDeployOutputsPath
+    $policyArmId = [string]$deployOutputs.enterprisePolicyArmId.value
+    if ([string]::IsNullOrWhiteSpace($policyArmId)) {
         throw 'enterprisePolicyArmId.value was not found in the deployment outputs JSON.'
     }
 
-    Install-RequiredModule -Name 'Microsoft.PowerPlatform.EnterprisePolicies'
-    Install-RequiredModule -Name 'Microsoft.PowerPlatform.Administration.PowerShell'
-
-    $regionCommand = Get-Command -Name 'Get-EnvironmentRegion' -ErrorAction SilentlyContinue
-    if (-not $regionCommand) {
-        throw 'Get-EnvironmentRegion is not available after importing the required modules.'
+    if ($policyArmId -notmatch '/providers/Microsoft\.PowerPlatform/enterprisePolicies/') {
+        throw "Deployment output enterprisePolicyArmId does not look like a Microsoft.PowerPlatform enterprise policy ARM ID: $policyArmId"
     }
 
-    $regionArgs = @{
-        EnvironmentId = $EnvironmentId
-    }
-    if ($regionCommand.Parameters.ContainsKey('TenantId')) {
-        $regionArgs['TenantId'] = $TenantId
-    }
+    Install-EnterprisePoliciesModule -RequiredVersion $EnterprisePoliciesModuleVersion
 
-    $regionResult = & $regionCommand @regionArgs
-    $regionText = (Get-RegionText -RegionResult $regionResult).Trim().ToLowerInvariant()
-    if ($regionText -ne 'unitedstates') {
-        throw "Environment region mismatch. Expected 'unitedstates' but received '$regionText'."
-    }
-
+    $regionCommand = Get-Command -Name 'Get-EnvironmentRegion' -ErrorAction Stop
+    $null = Get-Command -Name 'Get-SubnetInjectionEnterprisePolicy' -ErrorAction Stop
     $enableCommand = Get-Command -Name 'Enable-SubnetInjection' -ErrorAction Stop
-    $enableArgs = @{
+
+    $regionArguments = Get-EnterprisePoliciesCommandArguments -Command $regionCommand -Arguments @{
+        EnvironmentId = $EnvironmentId
+        TenantId      = $TenantId
+        ForceAuth     = $ForceAuth.IsPresent
+    }
+
+    $regionResult = & $regionCommand @regionArguments
+    $regionText = (Get-RegionText -RegionResult $regionResult).Trim()
+    $normalizedRegion = Get-NormalizedRegionToken -RegionText $regionText
+    if ($AllowedRegionTokens -notcontains $normalizedRegion) {
+        throw "Environment region mismatch. Expected the United States lab geography but received '$regionText'."
+    }
+
+    Write-Host "Using tenant ID           : $TenantId"
+    Write-Host "Deploy outputs path       : $ResolvedDeployOutputsPath"
+    Write-Host "Pinned module version     : $EnterprisePoliciesModuleVersion"
+    Write-Host "Resolved environment geo  : $regionText"
+    Write-Host "Target policy ARM ID      : $policyArmId"
+
+    $currentPolicyArmId = Get-CurrentLinkedPolicyArmId -EnvironmentId $EnvironmentId -TenantId $TenantId -UseForceAuth:$ForceAuth.IsPresent
+    if ($currentPolicyArmId) {
+        Write-Host "Current linked policy     : $currentPolicyArmId"
+
+        if ($currentPolicyArmId -ieq $policyArmId) {
+            Write-Host ''
+            Write-Host 'Power Platform VNet configuration already matches the requested policy. No changes were applied.' -ForegroundColor Yellow
+            Write-Host "Environment ID            : $EnvironmentId"
+            Show-NextSteps
+            exit 0
+        }
+
+        throw "Environment already has a different subnet injection policy linked: $currentPolicyArmId. This script does not swap policies automatically. Use Enable-SubnetInjection -Swap intentionally if you mean to replace it."
+    }
+
+    $enableArguments = Get-EnterprisePoliciesCommandArguments -Command $enableCommand -Arguments @{
         EnvironmentId = $EnvironmentId
         PolicyArmId   = $policyArmId
-    }
-    if ($enableCommand.Parameters.ContainsKey('TenantId')) {
-        $enableArgs['TenantId'] = $TenantId
-    }
-    if ($ForceAuth -and $enableCommand.Parameters.ContainsKey('ForceAuth')) {
-        $enableArgs['ForceAuth'] = $true
+        TenantId      = $TenantId
+        ForceAuth     = $ForceAuth.IsPresent
     }
 
-    Write-Host "Using tenant ID: $TenantId"
-    Write-Host "Applying enterprise policy: $policyArmId"
-    & $enableCommand @enableArgs | Out-Null
+    $enableResult = & $enableCommand @enableArguments
+    if ($enableResult -is [bool] -and -not $enableResult) {
+        throw 'Enable-SubnetInjection returned False.'
+    }
 
     Write-Host ''
     Write-Host 'Power Platform VNet configuration completed successfully.' -ForegroundColor Green
     Write-Host "Environment ID            : $EnvironmentId"
     Write-Host "Tenant ID                 : $TenantId"
     Write-Host "Enterprise policy ARM ID  : $policyArmId"
-    Write-Host ''
-    Write-Host 'Connector setup hints:'
-    Write-Host '  - Use the built-in Azure Key Vault connector -> see docs/connectors/keyvault.md'
-    Write-Host '  - Use the SQL Server connector -> see docs/connectors/sql.md'
-    Write-Host '  - Use the Azure Blob Storage connector -> see docs/connectors/blob.md'
-    Write-Host '  - Or build a custom connector -> see docs/connectors/custom-http.md'
+    Show-NextSteps
 }
 catch {
-    Write-Error $_
-    Show-FixupSteps
+    Write-Error -Message $_.Exception.Message
+    Show-FixupSteps -DeployOutputsFile $ResolvedDeployOutputsPath
     exit 1
 }

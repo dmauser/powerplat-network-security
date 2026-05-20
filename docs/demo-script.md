@@ -1,18 +1,19 @@
 # Demo script
 
-This script is a 20-minute customer-facing walkthrough that frames Power Platform virtual network support as the supported way to let Managed Environments reach private Azure services without exposing those services to the internet. The flow of the demo is to first show the problem in a non-Managed environment, then show the same connector actions succeeding from the lab's Managed Environment after subnet injection is enabled.
+This script is a 20-minute customer-facing walkthrough that frames Power Platform virtual network support as the supported way to let Managed Environments reach private Azure services without exposing those services to the internet. The flow of the demo is to first show the problem in a non-Managed environment, then show the same connector actions succeeding from the lab's Managed Environment after subnet injection is enabled, while explicit negative-path probes keep proving that the public endpoints stay blocked.
 
 ## Contents
 
 - [Overview](#overview)
 - [Pre-demo checklist](#pre-demo-checklist)
+- [Command spot-checks](#command-spot-checks)
 - [20-minute walkthrough](#20-minute-walkthrough)
 - [Talking points](#talking-points)
 - [After the meeting](#after-the-meeting)
 
 ## Overview
 
-Use this script with [architecture.md](./architecture.md), [deployment-guide.md](./deployment-guide.md), and the connector walkthroughs in [./connectors](./connectors/keyvault.md). Plan to have both a non-Managed environment and the lab's Managed Environment ready before you start, so you can show the before-and-after experience without spending time on setup during the meeting.
+Use this script with [architecture.md](./architecture.md), [deployment-guide.md](./deployment-guide.md), and the connector walkthroughs in [keyvault.md](./connectors/keyvault.md), [sql.md](./connectors/sql.md), [blob.md](./connectors/blob.md), and [custom-http.md](./connectors/custom-http.md). Plan to have both a non-Managed environment and the lab's Managed Environment ready before you start, so you can show the before-and-after experience without spending time on setup during the meeting.
 
 ## Pre-demo checklist
 
@@ -22,8 +23,45 @@ Before the call:
 - Have the lab's **Managed Environment** already linked to `<enterprisePolicyArmId>`.
 - Pre-create or prepare the Key Vault secret `demo-secret`, the SQL table `dbo.Sales`, and the Blob file `demo/hello.txt`.
 - Keep the deployment outputs handy: `<keyVaultName>`, `<keyVaultUri>`, `<sqlServerFqdn>`, `<sqlDatabaseName>`, `<storageAccountName>`.
+- Warm the SQL database once shortly before the meeting so the first query does not spend the demo on serverless resume latency.
+- Run `./scripts/03-validate-network.sh` and keep the output open in another terminal tab.
 - Open [architecture.md](./architecture.md) in one tab and the Azure portal in another.
-- If possible, pre-open Key Vault diagnostic logs or NSG flow logs so you can quickly show private-IP traffic evidence.
+- If possible, pre-open Key Vault diagnostic logs, Storage diagnostics, or NSG flow logs so you can quickly show private-IP traffic evidence.
+
+## Command spot-checks
+
+Use these commands before the meeting and keep the expected output handy. They were spot-checked for this repo on **2026-05-20**.
+
+### Public denial probes from the operator workstation
+
+These commands prove that the public endpoints stay blocked. They do **not** prove the allow path from inside `snet-pp-delegated`; the Managed Environment flow runs do that.
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" "https://<keyVaultName>.vault.azure.net/secrets/demo-secret?api-version=7.4"
+# Expected: 403
+
+curl -sS -o /dev/null -w "%{http_code}\n" "https://<storageAccountName>.blob.core.windows.net/demo/hello.txt"
+# Expected: 403
+```
+
+```powershell
+Test-NetConnection -ComputerName '<sqlServerFqdn>' -Port 1433 |
+  Select-Object ComputerName, RemotePort, TcpTestSucceeded
+# Expected: TcpTestSucceeded = False
+```
+
+### Storage SAS denial probe
+
+Use this once before the meeting if you want a stronger Blob negative-path proof than anonymous access alone.
+
+```bash
+RESOURCE_GROUP="$(az resource list --name <storageAccountName> --resource-type Microsoft.Storage/storageAccounts --query '[0].resourceGroup' -o tsv)"
+ACCOUNT_KEY="$(az storage account keys list -g "$RESOURCE_GROUP" -n <storageAccountName> --query '[0].value' -o tsv)"
+EXPIRY="$(pwsh -NoLogo -NoProfile -Command "(Get-Date).ToUniversalTime().AddMinutes(15).ToString('yyyy-MM-ddTHH:mmZ')")"
+SAS_TOKEN="$(az storage blob generate-sas --account-name <storageAccountName> --account-key "$ACCOUNT_KEY" --container-name demo --name hello.txt --permissions r --expiry "$EXPIRY" -o tsv)"
+curl -sS -o /dev/null -w "%{http_code}\n" "https://<storageAccountName>.blob.core.windows.net/demo/hello.txt?$SAS_TOKEN"
+# Expected: 403
+```
 
 ## 20-minute walkthrough
 
@@ -35,13 +73,15 @@ Before the call:
    - **Power Platform admin** links the Managed Environment to that policy.
    - **Maker** builds flows that now run through the delegated subnet path.
 3. Explain the hard requirement for this lab: **United States** Power Platform geography with **eastus + westus** Azure regions.
+4. Set audience expectations: public probes should keep failing from your workstation while the Managed Environment flows succeed because they execute from inside the delegated subnet path described in [Power Platform virtual network support](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview).
 
 ### 2-5 minutes: show the problem without VNet support
 
 1. Open the non-Managed environment.
 2. Run a simple flow that uses the **Azure Key Vault** connector to read `demo-secret`.
-3. Show the failure result, typically `403 Forbidden`.
-4. Frame the problem: the same resource is private, public access is disabled, and the non-Managed environment does not have the delegated subnet path required by [Power Platform virtual network support](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview).
+3. Show the failure result: action status **Failed** with a `403 Forbidden`-style outcome.
+4. If time allows, show the matching workstation probe returning `403` from `https://<keyVaultName>.vault.azure.net/secrets/demo-secret?api-version=7.4`.
+5. Frame the problem: the same resource is private, public access is disabled, and the non-Managed environment does not have the delegated subnet path required by [Power Platform virtual network support](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview).
 
 Suggested narration:
 
@@ -52,11 +92,12 @@ Suggested narration:
 1. Switch to the lab's Managed Environment.
 2. Open the equivalent flow or create it quickly by following [connectors/keyvault.md](./connectors/keyvault.md).
 3. Run the flow using the same secret name, `demo-secret`.
-4. Show the success result with HTTP 200 and the returned secret value.
-5. Point back to the architecture:
+4. Show the success result with HTTP `200` and the returned secret value.
+5. Say the contrast out loud: the public REST probe is still `403`, but the Managed Environment action succeeds because it is using the delegated subnet path.
+6. Point back to the architecture:
    - Environment is managed.
    - `Enable-SubnetInjection` linked it to `<enterprisePolicyArmId>`.
-   - Private DNS resolves `<keyVaultName>.vault.azure.net` to a private IP.
+   - Private DNS resolves `<keyVaultName>.vault.azure.net` to a private endpoint IP for the runtime.
    - The request stays on the Microsoft backbone and reaches the private endpoint.
 
 ### 9-12 minutes: demonstrate SQL connector
@@ -65,7 +106,8 @@ Suggested narration:
 2. Show **SQL Server -> Get rows (V2)**.
 3. Use `<sqlServerFqdn>` and `<sqlDatabaseName>`.
 4. Run the flow and show rows from `dbo.Sales`.
-5. Mention that the same delegated subnet path works for [SQL Server connector support](https://learn.microsoft.com/en-us/connectors/sql/), not just Key Vault.
+5. Show or mention the workstation negative probe: `Test-NetConnection` to `<sqlServerFqdn>:1433` returns `TcpTestSucceeded = False`.
+6. Mention that the same delegated subnet path works for [SQL Server connector support](https://learn.microsoft.com/en-us/connectors/sql/), not just Key Vault.
 
 ### 12-14 minutes: demonstrate Blob connector
 
@@ -73,20 +115,29 @@ Suggested narration:
 2. Show **Azure Blob Storage -> Get blob content (V2)**.
 3. Use `<storageAccountName>`, container `demo`, blob `hello.txt`.
 4. Run the flow and show the returned file content.
+5. Show or mention both negative probes:
+   - Anonymous GET to `https://<storageAccountName>.blob.core.windows.net/demo/hello.txt` returns `403`.
+   - A valid SAS on that same public URL also returns `403`.
+6. Reinforce that the blob is readable only through the private endpoint path used by the Managed Environment runtime.
 
 ### 14-16 minutes: demonstrate a custom HTTP connector
 
 1. Open the custom connector built with [connectors/custom-http.md](./connectors/custom-http.md).
 2. Show that the host is `<keyVaultName>.vault.azure.net`.
 3. Run `GET /secrets/demo-secret?api-version=7.4`.
-4. Explain the point of the demo: the network path is not limited to a single built-in connector. Any HTTPS API that the environment can reach privately, and that you authenticate correctly, can follow the same pattern.
+4. Show the HTTP `200` result.
+5. Explain the point of the demo: the network path is not limited to a single built-in connector. Any HTTPS API that the environment can reach privately, and that you authenticate correctly, can follow the same pattern.
 
 ### 16-18 minutes: prove it is private
 
-1. Open Key Vault diagnostics, NSG flow logs, or similar monitoring evidence.
-2. Show private IP addresses or private-endpoint-based traffic patterns.
-3. Reinforce that `publicNetworkAccess=Disabled` is still set on Key Vault, SQL, and Storage.
-4. Mention that the request path is controlled by your VNet design and policies.
+1. Open the `./scripts/03-validate-network.sh` output and call out three things:
+   - Key Vault public REST is `403`.
+   - SQL public TCP 1433 is denied.
+   - Blob anonymous and SAS-over-public both return `403`.
+2. Show the script's Azure-side DNS checks that compare Private DNS A records to the private endpoint IPs.
+3. Open Key Vault diagnostics, Storage diagnostics, NSG flow logs, or similar monitoring evidence.
+4. Show private IP addresses or private-endpoint-based traffic patterns.
+5. Reinforce that `publicNetworkAccess=Disabled` is still set on Key Vault, SQL, and Storage.
 
 ### 18-20 minutes: wrap up with governance and fit
 
@@ -95,6 +146,7 @@ Close with these points:
 - This is the supported outbound private-access model for Power Platform connectors and plug-ins in Managed Environments.
 - Region pairing matters: for this lab, US means **eastus + westus**.
 - Managed Environment entitlement and licensing matter for production planning.
+- Negative-path tests matter: do not assume "private" unless the public endpoints are still denied while the Managed Environment run succeeds.
 - For Power BI or Fabric private data access, the design conversation changes; see [expansion-roadmap.md](./expansion-roadmap.md).
 
 ## Talking points

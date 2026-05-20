@@ -3,3 +3,6 @@
 .squad/agents/*/history.md merge=union
 .squad/log/** merge=union
 .squad/orchestration-log/** merge=union
+
+# Keep shell scripts executable and portable across Windows/Linux checkouts
+*.sh text eol=lf
