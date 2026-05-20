@@ -209,6 +209,156 @@
 
 ---
 
+## Monitoring & Observability Decisions (2026-05-20)
+
+### 🟢 Monitoring Plumbing Complete (Trinity)
+
+**Date:** 2026-05-20T15:36:31-05:00
+
+New IaC modules deliver Log Analytics workspace (LAW) + diagnostic settings + alert infrastructure:
+
+**New modules:**
+- `infra/modules/logAnalytics.bicep` — central data sink
+- `infra/modules/diagnosticSettings.bicep` — reusable diagnostic-settings attacher (uses nested ARM as workaround for Bicep extension-resource scoping)
+- `infra/modules/alerts.bicep` — action group + 3 opt-in alert rules
+
+**Modified:**
+- `infra/modules/sql.bicep` — added `sqlDatabaseId` output
+- `infra/main.bicep` — wired LAW, 8 diagnostic fan-outs, alerts
+- `infra/parameters/dev.parameters.json` — added `logAnalyticsRetentionDays: 30`, `enableAlerts: false` (opt-in default rationale: lab environments often share subscriptions)
+
+**Diagnostic targets (8 total):**
+| Target | Log Categories | Metrics |
+|---|---|---|
+| Key Vault | `AuditEvent`, `AzurePolicyEvaluationDetails` | `AllMetrics` |
+| Storage blob | `StorageRead`, `StorageWrite`, `StorageDelete` | `Transaction` |
+| SQL Database | `SQLSecurityAuditEvents`, `Errors`, `Timeouts` | `Basic`, `InstanceAndAppAdvanced` |
+| PE–KV, PE–SQL, PE–Storage | _(none)_ | `AllMetrics` |
+| VNet eastus, VNet westus | _(none)_ | `AllMetrics` |
+
+**Canonical output names (LOCKED — no renaming without coordination):**
+- `logAnalyticsWorkspaceName` — workspace human-readable name
+- `logAnalyticsWorkspaceId` — full ARM resource ID
+
+**Bicep constraint note:** `diagnosticSettings.bicep` uses `Microsoft.Resources/deployments` nested ARM (Bicep limitation); `#disable-next-line no-deployments-resources` suppression inline. `az bicep build` and `az bicep lint` both pass 0.
+
+**Verification:**
+```bash
+az bicep build --file infra/main.bicep   # exit 0
+az bicep lint  --file infra/main.bicep   # exit 0, 0 warnings
+```
+
+### 🟢 Power Platform → Application Insights Wiring (Tank)
+
+**Date:** 2026-05-20T15:36:31-05:00
+
+Tank wired Power Platform telemetry pipeline to shared LAW workspace for end-to-end PP ↔ Azure resource correlation:
+
+**Decisions:**
+1. **Application Insights shape:** Workspace-based (`IngestionMode: 'LogAnalytics'`, `WorkspaceResourceId` → Trinity's LAW). Module at `infra/modules/appInsights.bicep`.
+2. **Cross-module output naming:** Aligned with Trinity; expects `logAnalyticsWorkspaceId` from LAW module.
+3. **PP AI binding: REST API (not cmdlet).** `Set-AdminPowerAppEnvironmentApplicationInsights` does not exist in module v0.17.0. Use Power Platform admin REST PATCH instead:
+   ```
+   PATCH https://api.bap.microsoft.com/providers/
+       Microsoft.BusinessAppPlatform/scopes/admin/environments/{envId}
+       ?api-version=2023-06-01
+   Body: {
+     "properties": {
+       "applicationInsightsId": "<appInsightsResourceId>",
+       "applicationInsightsKey": "<connectionString>"
+     }
+   }
+   ```
+4. **Idempotency:** Script 02 GETs environment first; skips PATCH if same AI already bound. Replacement is safe (unlike policy swap).
+5. **Connector telemetry scope:**
+   - ✅ Environment-level AI binding (script 02 REST PATCH)
+   - ✅ AI binding verification (script 04 read-only GET)
+   - ✅ KQL queries in LAW (script 04, referenced from `docs/monitoring.md`)
+   - ❌ Tenant-level analytics (PPAC UI only)
+   - ❌ Custom connector "Enable diagnostics" (per-connector make.powerapps.com UI)
+   - ❌ Canvas app republish after AI binding (manual)
+
+**Files added:**
+- `infra/modules/appInsights.bicep` — workspace-based AI resource
+- `scripts/04-enable-connector-telemetry.ps1` — verification + guidance script
+
+**Files modified:**
+- `infra/main.bicep` — appInsights module + `logAnalyticsWorkspaceId` param + 4 outputs
+- `scripts/02-configure-pp-vnet.ps1` — AI binding REST PATCH section after Enable-SubnetInjection
+- `.squad/skills/pp-app-insights-wiring/SKILL.md` — reusable pattern
+
+**Verification:** Both scripts parse-clean; Bicep build clean.
+
+### 🟢 Monitoring Documentation Complete (Niobe)
+
+**Date:** 2026-05-20T15:36:31-05:00
+
+`docs/monitoring.md` (17.5 KB) delivered as comprehensive operator guide for PP → Azure telemetry:
+
+**Structure (9 sections):**
+1. What gets logged (diagnostic categories table)
+2. Telemetry architecture (Mermaid flowchart: App Insights + resource diagnostics → shared LAW)
+3. 6 operator KQL queries:
+   - (a) Is PP reaching KV over private endpoint?
+   - (b) Public-endpoint denial attempts?
+   - (c) Audit trail (who/what accessed secret)?
+   - (d) Private endpoint health?
+   - (e) DNS resolution verification?
+   - (f) End-to-end correlation (App Insights ↔ backend)?
+4. Dashboard setup (pinning to dashboards or Workbooks)
+5. Alerts (enable, configure action group)
+6. Troubleshooting decision tree (validation script → audit → PE health → DNS → PP setup re-link)
+7. Cost note (LAW PerGB2018 SKU, 30d retention default, controls)
+8. References (8 Microsoft Learn citations)
+
+**Cross-links added (8 files, 11 new links):**
+- README.md — added monitoring.md to Documentation index
+- docs/architecture.md — telemetry plane reference
+- docs/security-notes.md — expanded logging section
+- docs/deployment-guide.md — post-validation step
+- docs/connectors/{keyvault, sql, blob, custom-http}.md — "Verify via telemetry" sub-bullets
+
+**Assumptions made (Trinity/Tank work will verify):**
+1. LAW output: `logAnalyticsWorkspaceName`, `logAnalyticsWorkspaceId`
+2. App Insights output: `appInsightsName`
+3. Diagnostic categories: Trinity confirms KV, SQL, Storage categories in monitoring.bicep
+4. PE metrics only (no logs) — platform limitation per Microsoft Learn
+5. VNet CIDRs: eastus 10.10.0.0/16, westus 10.20.0.0/16; delegated: 10.10.0.0/27, 10.20.0.0/27
+6. Alerts: Trinity ships 3 opt-in rules; script 04 enables by setting parameter
+7. Tank's scope: scripts 02 + 04 bind ME to App Insights and enable connector telemetry
+
+**Verification:** Relative links confirmed; Mermaid syntax valid; no broken links detected.
+
+**Reusable skill candidate:** "Private endpoint monitoring operator guide" (structure: operator questions → KQL queries → decision tree → cost note) — portable to Cosmos DB, Event Hubs, etc.
+
+### 🟢 Documentation Freshness Audit (Niobe)
+
+**Date:** 2026-05-20T14:40:24-05:00
+
+Full audit of 13 active markdown files (README.md + docs/**/*.md) verifying sync with infrastructure changes:
+
+**Audit results:**
+| Check | Status |
+|---|---|
+| Region narrative (westus3 → eastus) | ✅ PASS |
+| ACL/bypass (None not AzureServices) | ✅ PASS |
+| Validation/demo flow alignment | ✅ PASS |
+| Module version pin (0.17.0) | ⚠️ FIXED |
+| Prereqs (az 2.60+, pwsh 7+, LF) | ✅ PASS |
+| Connector test sections | ✅ PASS |
+| Architecture diagram (no hard-codes) | ✅ PASS |
+| Link integrity (0 broken) | ✅ PASS |
+| Contents/TOC drift | ✅ PASS |
+| Microsoft Learn citations | ✅ PASS |
+
+**Changes applied:**
+1. `docs/managed-environment-setup.md` (line 89) — Explicit version 0.17.0 + re-run safety note
+2. `docs/deployment-guide.md` (lines 93–98) — Auto-install version + re-run idempotency documented
+
+**Status:** Production-ready; zero outstanding issues.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
