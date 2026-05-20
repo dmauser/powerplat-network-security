@@ -35,6 +35,7 @@
 
 ## Learnings
 
+- 2026-05-20T14:40:24-05:00 — **Freshness audit after sweep:** All documentation remains accurate after region (eastus), bypass (None), connector test sections, and script version-pin changes. Zero broken links (13 files scanned). Identified stale version-pin documentation (0.17.0 not explicitly documented in deployment-guide; fixed). All 4 connector docs correctly have "Testing the private path" sections. Re-run-safety of 02-configure-pp-vnet.ps1 is now explicitly documented. Pattern: Always verify version pins mentioned in scripts are documented; always note script re-run idempotency.
 - 2026-05-20T13:55:18-05:00 — Full repo docs audit passed: all 13 files comply with GitHub-flavored Markdown, summary + contents + body structure, ATX headings, proper code fences with language tags, all 182 links verified, no broken links after fixes.
 - 2026-05-20T13:55:18-05:00 — Archive directory is referenced but does NOT exist; requires team decision (create, remove, or clarify as future).
 - 2026-05-20T14:17:03-05:00 — Merged Neo's demo-script test steps into all 4 connector docs under "## Testing the private path" sections with public/private deny/allow probe validation patterns.
