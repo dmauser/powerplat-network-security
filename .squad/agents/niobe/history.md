@@ -51,3 +51,13 @@
 ## Team Update — 2026-05-20T15:50:00-05:00
 
 **Monitoring trio coordination complete.** docs/monitoring.md (17.5 KB) delivered with 6 KQL queries, Mermaid telemetry flowchart, and 8-file cross-link refresh (0 broken links). Documentation freshness audit confirmed all changes (region, bypass, script pins, connector tests) are synced and production-ready. Trinity's `logAnalyticsWorkspaceName`/`logAnalyticsWorkspaceId` outputs adopted consistently in docs; Tank's scripts 02+04 referenced explicitly in workflow section. Pattern: Private endpoint monitoring operator guide (structure: operator questions → KQL queries → decision tree → cost note) extracted as reusable skill for future services. See `.squad/orchestration-log/2026-05-20T15-50-00Z-niobe-3.md` for full audit results.
+
+## Punch List — Queued for Niobe (2026-05-20T21:06:15-05:00)
+
+**P6 — Close PE Diagnostic Gap in decisions.md:** Update the monitoring section in `.squad/decisions.md` to reflect the platform limitation discovered during Neo's audit:
+
+Current (incorrect): "PE–KV, PE–SQL, PE–Storage — diagnosticSettings with _(none)_ log categories, `AllMetrics`"
+
+Updated (correct): "Private Endpoint metrics are monitored via Azure Monitor Metrics blade. Azure platform does NOT support `Microsoft.Insights/diagnosticSettings` for `microsoft.network/privateendpoints` (`ResourceTypeNotSupported`). See `infra/modules/private-endpoint.bicep` inline comment for details. Metric used: `PEConnectionsConnected` (active connection count)."
+
+**Rationale:** Neo's audit confirmed this is a known Azure platform limitation. The Bicep module already documents it with inline comments. The decisions.md table must be corrected to close the discrepancy.

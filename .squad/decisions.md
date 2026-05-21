@@ -1,7 +1,7 @@
 # Squad Decisions
 
-**Last Updated:** 2026-05-20T14:17:03-05:00  
-**Source:** Repo review sweep follow-up completion — all 5 outstanding items resolved
+**Last Updated:** 2026-05-20T21:06:15-05:00  
+**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion
 
 ## Architecture & Scope
 
@@ -356,6 +356,149 @@ Full audit of 13 active markdown files (README.md + docs/**/*.md) verifying sync
 2. `docs/deployment-guide.md` (lines 93–98) — Auto-install version + re-run idempotency documented
 
 **Status:** Production-ready; zero outstanding issues.
+
+---
+
+## Lab Deployment State (Neo, 2026-05-20T21:06:15-05:00)
+
+### Deployment Audit Summary
+
+**Subscription:** 43d55e51-58fe-486f-9e2a-ba56b8dd15de (ME-MngEnvMCAP423074-dmauser-1)  
+**Resource Group:** `rg-pbinet-dev-eastus` (single RG, hosts both eastus and westus resources)  
+**Audit Date:** 2026-05-20T21:06:15-05:00  
+**Scope:** READ-ONLY audit against live Azure state. No changes made.
+
+#### Score
+
+- **22 PASS** — VNets, peering, delegation, private endpoints (KV + Blob), DNS zones, monitoring, public-access lockdown all correct
+- **7 GAP** — SQL not deployed (capacity issue), ME not linked to policy, enterprise policy health Undetermined, App Insights not bound, connector flows untested
+- **2 UNVERIFIED** — KV secret (`demo-secret`), Blob object (`demo/hello.txt`) unverifiable from public (access blocked—correct)
+- **1 KNOWN PLATFORM LIMIT** — Private endpoint diagnostic settings NOT supported (Azure platform constraint); PE health monitored via Azure Monitor Metrics blade
+
+#### Key Gaps (Prioritized)
+
+1. **SQL Module Skip** — East US was at capacity during deploy; set `deploySql=true` and redeploy when available, OR fallback to `eastus2`.
+2. **ME Linkage** — Enterprise policy `healthStatus: Undetermined` (ME not linked yet). Requires Tank to run `scripts/02-configure-pp-vnet.ps1 -EnvironmentId <id>`.
+3. **App Insights Binding** — Included in script 02; will bind ME to Application Insights via REST PATCH once enabled.
+4. **Connector Flows** — Blocked on ME linkage. Once linked, smoke test all 4 connectors (KV, SQL, Blob, Custom HTTP).
+5. **Demo Artifacts** — Bicep does NOT provision KV secret or Blob content; manual seeding required post-deploy.
+6. **PE Diagnostic Gap in Decisions.md** — PE metrics listed as diagnostic target, but platform does NOT support this. Decision doc must be updated to reflect platform limitation.
+
+#### Files Referenced
+
+- Deploy outputs: `.azure/last-deploy-outputs.json`
+- Audit history: `.squad/agents/neo/history.md`
+- Punch list: See Trinity + Tank + Niobe sections below
+
+---
+
+## Phase 1 Deployment Summary (Trinity, 2026-05-20T17:10:48-05:00)
+
+**Status:** **Succeeded** (with SQL skipped)  
+**Resource Group:** `rg-pbinet-dev-eastus`  
+**Deployment Name:** `pp-vnet-kv-demo-202605201710`
+
+### Resources Deployed
+
+| Resource | Name |
+|---|---|
+| Enterprise Policy | `ep-pbinet-dev` |
+| VNet East | `vnet-pbinet-dev-east` (10.10.0.0/16, eastus) |
+| VNet West | `vnet-pbinet-dev-west` (10.20.0.0/16, westus) |
+| Key Vault | `kv-pbinet-dev-k6ozyjreme` |
+| Storage Account | `stpbinetdevk6ozyjremes6m` |
+| UAMI | `uami-pbinet-dev` |
+| Log Analytics Workspace | `law-pbinet-dev-k6ozyjremes6m` |
+| Application Insights | `appi-pbinet-dev` (workspace-based, wired to LAW) |
+| PE Key Vault | `pep-kv-pbinet-dev` (10.10.1.4) |
+| PE Storage | `pep-stg-pbinet-dev` (10.10.1.5) |
+| Private DNS zones | `privatelink.vaultcore.azure.net`, `privatelink.blob.core.windows.net`, `privatelink.database.windows.net` (SQL zone exists, no records yet) |
+| Action group | `ag-pbinet-dev-observability` |
+
+### IaC Fixes Applied During Deployment
+
+1. **`diagnosticSettings.bicep` — ARM expression escaping** — Removed generic diagnostic module; moved typed settings into each resource module (KV, Storage, SQL, Network) using proper Bicep `scope:` references.
+2. **`private-dns.bicep` — Missing VNet link location** — Added `location: 'global'` to all 6 `Microsoft.Network/privateDnsZones/virtualNetworkLinks`.
+3. **`private-endpoint.bicep` — Unsupported PE diagnostic settings** — Removed PE diagnostic settings (Azure platform does NOT support `microsoft.network/privateendpoints` diagnostics); PE metrics accessible via Azure Monitor Metrics blade.
+4. **RG name mismatch** — Added `resourceGroupNameOverride` param to `main.bicep` and `dev.parameters.json` (fixed: `rg-pbinet-dev` → `rg-pbinet-dev-eastus`).
+5. **App Insights not wired** — Added App Insights module call + outputs in `main.bicep`.
+
+### SQL Status — ⚠️ SKIPPED
+
+**Reason:** `RegionDoesNotAllowProvisioning` — East US at capacity.  
+**Options:**
+- Option A: Retry East US when capacity available; set `deploySql=true` and re-run `scripts/01-deploy.sh`.
+- Option B: Fallback to `eastus2` (requires SQL region param override).
+
+**Blocked:** SQL Server, SQL Database, PE-SQL, SQL private DNS A record, SQL diagnostic settings.
+
+### Monitoring
+
+- Log Analytics workspace deployed with 30-day retention.
+- Diagnostic settings: KV (AuditEvent + AzurePolicyEvaluationDetails + AllMetrics), Storage blob (StorageRead/Write/Delete + Transaction), VNets (AllMetrics).
+- Alerts: opt-in (enableAlerts=false default; action group deployed).
+
+---
+
+## Phase 2 Prep — Enterprise Policy Binding (Tank, 2026-05-20T18:50:00-05:00)
+
+**Status:** **BLOCKED** — Operator must grant Power Platform Administrator Entra role  
+**Blocking Error:** `403 EnvironmentAccess — UserMissingRequiredPermission: ManageProtectionKeys`
+
+### Current State
+
+- Enterprise policy `ep-pbinet-dev` fully provisioned (kind=NetworkInjection, both subnets wired).
+- Dataverse provisioned in default environment (`org3b450e2b.crm.dynamics.com` — side effect, benign).
+- Script fixes completed: EP module v0.17.0 compatibility bugs fixed, `Ensure-AzContext` bridge added, deploy outputs patched with AI fields.
+- **ME not yet linked to policy** — all script logic ready, blocked on role assignment.
+
+### Required Operator Action
+
+Tenant Global Administrator (`ms-breakglass@MngEnvMCAP423074.onmicrosoft.com`) must assign **Power Platform Administrator** Entra role to `admin@MngEnvMCAP423074.onmicrosoft.com`.
+
+**Via Entra admin center:**
+1. https://entra.microsoft.com → **Roles and administrators** → **Power Platform administrator** → **Add assignments** → add `admin@MngEnvMCAP423074.onmicrosoft.com`
+
+**Via az CLI (breakglass session):**
+```powershell
+az login --tenant ebf541ac-cacf-4a40-b46e-1accc3810ef8
+# sign in as ms-breakglass@...
+
+$templateId = "11648597-926c-4cf3-9c36-bcebb0ba8dcc"
+az rest --method POST `
+  --url "https://graph.microsoft.com/v1.0/directoryRoles" `
+  --body "{`"roleTemplateId`":`"$templateId`"}"
+
+$roleId = (az rest --method GET `
+  --url "https://graph.microsoft.com/v1.0/directoryRoles?\`$filter=roleTemplateId eq '$templateId'" `
+  -o json | ConvertFrom-Json).value.id
+
+$adminUserId = "7b5e0f11-5e99-4008-a136-9e42428f73e7"
+az rest --method POST `
+  --url "https://graph.microsoft.com/v1.0/directoryRoles/$roleId/members/\`$ref" `
+  --body "{`"@odata.id`":`"https://graph.microsoft.com/v1.0/directoryObjects/$adminUserId`"}"
+```
+
+### After Role Assignment
+
+Resume Phase 2:
+```powershell
+az account set --subscription 43d55e51-58fe-486f-9e2a-ba56b8dd15de 2>$null
+
+# Enterprise policy link
+$ppToken = (az account get-access-token --resource 'https://service.powerapps.com/' -o json | ConvertFrom-Json).accessToken
+$envId = "Default-ebf541ac-cacf-4a40-b46e-1accc3810ef8"
+$systemId = "/regions/unitedstates/providers/Microsoft.PowerPlatform/enterprisePolicies/09c8ad9a-e3f4-4d60-94aa-978562ec65fc"
+$body = '{"SystemId":"' + $systemId + '"}'
+$resp = Invoke-WebRequest -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments/$envId/enterprisePolicies/NetworkInjection/link?api-version=2019-10-01" `
+    -Method POST -Headers @{ Authorization = "Bearer $ppToken"; 'Content-Type' = 'application/json' } -Body $body
+
+# Should return 202 Accepted
+Write-Host "Status: $($resp.StatusCode)"
+Write-Host "operation-location: $($resp.Headers['operation-location'])"
+
+# Poll operation-location until status=Succeeded
+```
 
 ---
 

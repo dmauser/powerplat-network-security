@@ -34,3 +34,16 @@
   - **East US SQL capacity:** `RegionDoesNotAllowProvisioning` at deploy time. Use `deploySql=true` when capacity is available or add `sqlLocation` param to target `eastus2`.
   - **Subscription context drift:** sync/async PowerShell shells can have different active subscriptions. Always `az account show` per shell. Fix: `az account set --subscription`.
   - **App Insights unwired:** `infra/modules/appInsights.bicep` existed but was never called from `main.bicep`. Wired in this session.
+
+## Punch List — Queued for Trinity (2026-05-20T21:06:15-05:00)
+
+**P1 — Deploy SQL (retry or fallback):** East US was at capacity during Phase 1 deployment. Options:
+- **Option A (preferred):** Retry. Set `deploySql=true` in `infra/parameters/dev.parameters.json` (or command-line override) and re-run `scripts/01-deploy.sh` when East US SQL capacity becomes available.
+- **Option B (fallback):** Change `defaultLocation` to `eastus2` and redeploy (note: this will place SQL in a different region than shared resources).
+
+**Success criteria:**
+- SQL Server appears in `rg-pbinet-dev-eastus`
+- PE-SQL deployed with IP in `snet-pep` (10.10.1.x/27)
+- DNS A record in `privatelink.database.windows.net` → PE-SQL private IP
+- SQL diagnostic settings (`diag-sql`) created and streaming to LAW
+- `.azure/last-deploy-outputs.json` contains non-empty `sqlServerFqdn` + `sqlDatabaseName`
