@@ -8,6 +8,7 @@ Proves end-to-end that Power Platform reaches a private-only Key Vault (`publicN
 - [Demo Part 1 — Negative test](#demo-part-1--negative-test-proves-public-path-is-blocked)
 - [Demo Part 2 — Positive test via Power Apps](#demo-part-2--positive-test-via-power-apps)
 - [Demo Part 3 — Evidence the call went through the VNet PE](#demo-part-3--evidence-the-call-went-through-the-vnet-pe)
+- [Demo Part 4 — Custom code path with App Insights dependency tracking (planned)](#demo-part-4--custom-code-path-with-app-insights-dependency-tracking-planned)
 - [Troubleshooting](#troubleshooting)
 - [Cleanup](#cleanup)
 
@@ -190,7 +191,7 @@ AzureDiagnostics
 
 **What you'll see:** One row per button press showing `ResultType = Success`.
 
-**Expected `CallerIPAddress`:** A 10.10.x.x address (the private endpoint NIC in the eastus VNet). **If you see a public IP, the PE/private-DNS path is bypassed.** See [troubleshooting.md](../troubleshooting.md) (being authored in parallel) for resolution steps.
+**Expected `CallerIPAddress`:** A private address from **either** delegated subnet — `10.10.0.0/27` (east) **or** `10.20.0.0/27` (west). Both are valid: Power Platform runs active/active across the paired regions and either worker may originate the call. The west-originated calls traverse the global VNet peering into the east-region private endpoint. See [architecture.md → Why Power Platform needs delegated subnets in BOTH paired regions](../architecture.md#why-power-platform-needs-delegated-subnets-in-both-paired-regions). **If you see a public IP, the PE/private-DNS path is bypassed.** See [troubleshooting.md](../troubleshooting.md) for resolution steps.
 
 **Latency:** AzureDiagnostics for Key Vault typically arrives in 3–5 minutes after the operation.
 
@@ -207,7 +208,7 @@ NSPAccessLogs
 | order by TimeGenerated desc
 ```
 
-**What you'll see:** One row per button press showing the private endpoint inbound traffic. `SourceIpAddress` should be a 10.10.x.x address from the delegated subnet.
+**What you'll see:** One row per button press showing the private endpoint inbound traffic. `SourceIpAddress` should be a private address from **either** `10.10.0.0/27` (east delegated subnet) **or** `10.20.0.0/27` (west delegated subnet) — see the [architecture note on dual-region egress](../architecture.md#why-power-platform-needs-delegated-subnets-in-both-paired-regions).
 
 **Latency:** NSP logs can take 5–15 minutes to arrive. Do not panic if this query returns zero rows in the first 10 minutes.
 
@@ -229,6 +230,61 @@ NSPAccessLogs
      --query "[].virtualNetwork.id" -o tsv
    ```
    Expected: both `vnet-pbinet-dev-east` and `vnet-pbinet-dev-west` resource IDs.
+
+---
+
+## Demo Part 4 — Custom code path with App Insights dependency tracking (planned)
+
+> **Why this part exists.** The Power Apps Key Vault connector runs in the Power Platform service plane and is therefore invisible to a customer-owned Application Insights instance (see the IMPORTANT box at the top of Part 3). To get end-to-end **distributed tracing** — `requests` → `dependencies` to `*.vault.azure.net` — you need code **you instrument**, running on compute **you own**, routed through the **same private endpoint** the connector uses. A small Azure Function App is the lightest way to demonstrate that.
+>
+> **Status:** scoped. Bicep + deployment wiring not yet merged. Track in [`expansion-roadmap.md`](../expansion-roadmap.md). Owners on the squad: Trinity (Bicep), Tank (deploy + smoke test), Niobe (this doc).
+
+### What this demo will prove
+
+1. The **same Key Vault private endpoint** that serves the Power Apps connector also serves a VNet-integrated Function App — no second PE required.
+2. **App Insights dependency tracking lights up** for the custom path. The query that returns zero rows today (`dependencies | where target contains "vault.azure.net"`) will return one row per Function invocation, with `success = true`, `resultCode = 200`, and `target` resolving to a private IP.
+3. **End-to-end correlation** works: a single `operation_Id` ties together the HTTP `requests` row (Function entry) and the `dependencies` row (Key Vault call) so you can demo distributed tracing without a second service.
+
+### Target shape
+
+- **Function App (PowerShell 7.4 or .NET 8 isolated)** with one HTTP trigger that calls `Get-AzKeyVaultSecret` (or `SecretClient.GetSecretAsync`) for `demo-secret`.
+- **System-assigned managed identity** on the Function App, granted `Key Vault Secrets User` on `kv-pbinet-dev-*`.
+- **VNet integration** (regional, outbound) to a new `snet-funcapp` `/27` in `vnet-pbinet-dev-east` — separate from `snet-pp-delegated` (PP owns that delegation) and separate from `snet-pep` (no app workloads in PE subnets).
+- **Private DNS** already covers it: `privatelink.vaultcore.azure.net` is linked to both VNets, so the Function's outbound DNS lookup resolves to the private IP automatically.
+- **Same App Insights instance** (`appi-pbinet-dev`) so existing dashboards and the `dependencies` KQL just start returning rows.
+- **`publicNetworkAccess = Disabled`** on the Function App's inbound surface, with access through a fourth private endpoint on `snet-pep` (so the trigger URL is reachable only from inside the VNet or via a jump host).
+
+### KQL that will start working after Part 4 deploys
+
+```kusto
+// Run in: appi-pbinet-dev (Application Insights)
+union requests, dependencies
+| where timestamp > ago(30m)
+| where operation_Id in (
+    (requests
+     | where name == "GET /api/GetSecret"
+     | project operation_Id)
+  )
+| project timestamp, itemType, name, target, resultCode, success, duration, operation_Id
+| order by timestamp asc
+```
+
+Expected output: paired `requests` + `dependencies` rows per invocation, with the dependency `target` ending in `.vault.azure.net` and `success = true`.
+
+### Why not just instrument the Power Apps connector?
+
+You can't. The connector runtime is a managed Microsoft service — there is no hook to attach your App Insights SDK to it. Part 3 (Log Analytics on the Key Vault resource) is the supported way to observe the connector path. Part 4 is the only way to observe a **custom code** path with the same level of detail you'd expect from any other instrumented workload.
+
+### Deployment hand-off
+
+When Trinity merges the Function App Bicep module, this section will be expanded with:
+
+- `infra/modules/funcapp.bicep` parameter table
+- `scripts/01-deploy.sh` additions (`functionAppName` output placeholder)
+- Smoke-test `curl` from the jump host
+- The verified KQL with a screenshot
+
+Until then, treat this as the **planned scope**, and use Part 3 as the authoritative validation for the connector path.
 
 ---
 

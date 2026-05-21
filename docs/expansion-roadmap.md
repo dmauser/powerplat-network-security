@@ -9,6 +9,7 @@ This roadmap captures the most natural follow-on conversations after the base la
 - [Dataverse plug-in sample with Key Vault](#dataverse-plug-in-sample-with-key-vault)
 - [Hybrid on-premises connectivity](#hybrid-on-premises-connectivity)
 - [Additional connector ideas](#additional-connector-ideas)
+- [Function App for App Insights dependency tracing](#function-app-for-app-insights-dependency-tracing)
 - [Single-region and non-US variants](#single-region-and-non-us-variants)
 - [Production hardening](#production-hardening)
 - [Learn more](#learn-more)
@@ -52,6 +53,20 @@ Once the base four demos are working, consider adding more supported services:
 - Databricks
 
 Those ideas map directly to the supported-services list in the [virtual network support overview](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview#supported-services).
+
+## Function App for App Insights dependency tracing
+
+The Power Apps Key Vault connector runs in the Power Platform service plane and is not visible to a customer-owned Application Insights instance — `dependencies | where target contains "vault.azure.net"` returns zero rows even when the connector path is healthy. To close that observability gap, add a small VNet-integrated **Azure Function App** that calls Key Vault from code you own and instrument.
+
+Planned shape:
+
+- HTTP-triggered Function (PowerShell 7.4 or .NET 8 isolated) that reads `demo-secret` and returns 200.
+- System-assigned managed identity with `Key Vault Secrets User` on `kv-pbinet-dev-*`.
+- Regional VNet integration into a new `snet-funcapp` `/27` in `vnet-pbinet-dev-east` (separate from `snet-pp-delegated` and `snet-pep`).
+- Inbound private endpoint on `snet-pep`, `publicNetworkAccess = Disabled`.
+- Same `appi-pbinet-dev` Application Insights instance — no new resource needed.
+
+This is the **Demo Part 4** scaffolding tracked in [`demos/keyvault-demo.md`](./demos/keyvault-demo.md#demo-part-4--custom-code-path-with-app-insights-dependency-tracking-planned). Owners: Trinity (Bicep module `infra/modules/funcapp.bicep`), Tank (`scripts/01-deploy.sh` wiring + smoke test), Niobe (doc expansion once deployed).
 
 ## Single-region and non-US variants
 

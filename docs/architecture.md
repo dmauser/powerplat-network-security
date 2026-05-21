@@ -149,6 +149,52 @@ For the United States geography, Learn requires two VNets in different paired re
 
 Always validate the target environment with `Get-EnvironmentRegion` before linking it. If the environment region does not map to the VNet pair you built, subnet injection will either fail or produce an unsupported configuration. See [managed-environment-setup.md](./managed-environment-setup.md) and [troubleshooting.md](./troubleshooting.md).
 
+### Why Power Platform needs delegated subnets in BOTH paired regions
+
+A common point of confusion when reading Key Vault / SQL / Storage diagnostic logs in this lab is seeing a `CallerIPAddress` from the **west** delegated subnet (`10.20.0.0/27`) hitting a private endpoint that lives in the **east** VNet. The east delegated subnet (`10.10.0.0/27`) is **not** the only valid source IP — both are.
+
+The reason is built into how Power Platform implements virtual network support for a paired geography:
+
+- The Power Platform service plane is **active in both paired regions** for any geography that has a region pair. For the United States that is `eastus` **and** `westus`. See [VNet support overview — supported regions](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview#supported-regions).
+- The `Microsoft.PowerPlatform/enterprisePolicies` resource of `kind=NetworkInjection` references **two** subnet IDs in its `properties.networkInjection.virtualNetworks` array — one per region. `Enable-SubnetInjection` is what wires the Managed Environment to that two-subnet policy.
+- At runtime, when a flow, a Power Apps connector call, or a plug-in needs an outbound socket, the Power Platform service picks **whichever region's delegated subnet is healthy and closest to the worker that handles the call**. There is no "primary" subnet from the data plane's perspective — both are first-class egress paths.
+- Because every private DNS zone in this lab (`privatelink.vaultcore.azure.net`, `privatelink.database.windows.net`, `privatelink.blob.core.windows.net`) is linked to **both** VNets, the FQDN resolves to the same private endpoint IP regardless of which subnet originated the call. The global VNet peering then carries west-originated traffic into the east VNet where the private endpoint NIC lives.
+
+Concrete consequence observed in the lab: a single Power Apps button press against the Key Vault connector can show up in `AzureDiagnostics` with `CallerIPAddress = 10.20.0.4` (west delegated subnet) on one run and `10.10.0.4` (east delegated subnet) on the next, even though the Key Vault private endpoint is in `vnet-pbinet-dev-east`. **Both are correct. Both prove the private path is being used.** A public IP would be the failure signal.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant ME as Managed Environment (US geo)<br/>linked via Enable-SubnetInjection
+    participant PPE as Power Platform service plane<br/>(eastus worker)
+    participant PPW as Power Platform service plane<br/>(westus worker)
+    participant SE as snet-pp-delegated (east)<br/>10.10.0.0/27
+    participant SW as snet-pp-delegated (west)<br/>10.20.0.0/27
+    participant PEER as Global VNet peering
+    participant PE as Key Vault private endpoint<br/>NIC in vnet-pbinet-dev-east
+    participant KV as Key Vault<br/>publicNetworkAccess=Disabled
+
+    ME->>PPE: Connector call (run #1)
+    PPE->>SE: Outbound socket from 10.10.0.x
+    SE->>PE: Resolves privatelink.vaultcore.azure.net via private DNS
+    PE->>KV: Authorized data-plane request
+    KV-->>ME: Secret value (CallerIPAddress logged as 10.10.0.x)
+
+    ME->>PPW: Connector call (run #2)
+    PPW->>SW: Outbound socket from 10.20.0.x
+    SW->>PEER: Cross-region hop
+    PEER->>PE: Same private endpoint, same private IP
+    PE->>KV: Authorized data-plane request
+    KV-->>ME: Secret value (CallerIPAddress logged as 10.20.0.x)
+```
+
+Operational checklist this drives:
+
+- Treat **either** `10.10.0.0/27` **or** `10.20.0.0/27` as a successful private-path signal in Key Vault, SQL, Storage, and NSP logs.
+- Keep both VNets linked to every `privatelink.*` zone — dropping the west link would cause west-originated calls to fall back to public DNS and silently break.
+- Keep global VNet peering between east and west healthy — see [troubleshooting.md](./troubleshooting.md) for the peering symptom matrix.
+- When sizing the delegated subnets for production, size **both** for peak — failover is not "west sits idle until east dies", it is active/active load distribution.
+
 ## Private DNS
 
 Each private DNS zone is linked to **both** VNets, even though the three private endpoints are created in VNet-East. That dual linking matters because the enterprise policy references delegated subnets in both regions, and any runtime path or failover path still needs to resolve the service FQDNs to private IP addresses instead of public ones.
