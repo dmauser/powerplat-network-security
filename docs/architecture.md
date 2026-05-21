@@ -120,6 +120,8 @@ Why this matters:
 
 The lab uses `/27` delegated subnets because it is a compact demo, but the production sizing guidance in [vnet support overview](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview#estimating-subnet-size-for-power-platform-environments) recommends sizing based on environment count and runtime IP consumption.
 
+> **Part 4 (dual-region Function Apps):** The demo extends the VNet topology with an additional `/27` workload subnet per region (`snet-funcapp` in eastus and westus) to VNet-integrate Azure Function Apps that call Key Vault through the same private endpoints used by Power Platform connectors. This provides deterministic evidence that both regional paths can reach private resources. See [demos/keyvault-demo.md → Part 4](./demos/keyvault-demo.md#demo-part-4--dual-region-function-apps-with-deterministic-app-insights-dependency-tracking) for the full scope and unblock path.
+
 ## Two-region pairing
 
 For the United States geography, Learn requires two VNets in different paired regions: **eastus** and **westus**. The same Learn article also provides the broader supported geography-to-region mapping, summarized below for planning purposes.
@@ -158,6 +160,9 @@ The reason is built into how Power Platform implements virtual network support f
 - The Power Platform service plane is **active in both paired regions** for any geography that has a region pair. For the United States that is `eastus` **and** `westus`. See [VNet support overview — supported regions](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview#supported-regions).
 - The `Microsoft.PowerPlatform/enterprisePolicies` resource of `kind=NetworkInjection` references **two** subnet IDs in its `properties.networkInjection.virtualNetworks` array — one per region. `Enable-SubnetInjection` is what wires the Managed Environment to that two-subnet policy.
 - At runtime, when a flow, a Power Apps connector call, or a plug-in needs an outbound socket, the Power Platform service picks **whichever region's delegated subnet is healthy and closest to the worker that handles the call**. There is no "primary" subnet from the data plane's perspective — both are first-class egress paths.
+
+> **What you cannot control:** Region selection is **per-call**, decided by the internal Power Platform scheduler based on which worker processes the request. There is no environment property, connection setting, or HTTP header to pin a call to a specific region. You cannot guarantee that a single Power Apps button press will originate from eastus versus westus — it is active/active load distribution. This is why [Part 4 of the Key Vault demo](./demos/keyvault-demo.md#demo-part-4--dual-region-function-apps-with-deterministic-app-insights-dependency-tracking) uses Function Apps (compute you own) to produce deterministic one-per-region evidence.
+
 - Because every private DNS zone in this lab (`privatelink.vaultcore.azure.net`, `privatelink.database.windows.net`, `privatelink.blob.core.windows.net`) is linked to **both** VNets, the FQDN resolves to the same private endpoint IP regardless of which subnet originated the call. The global VNet peering then carries west-originated traffic into the east VNet where the private endpoint NIC lives.
 
 Concrete consequence observed in the lab: a single Power Apps button press against the Key Vault connector can show up in `AzureDiagnostics` with `CallerIPAddress = 10.20.0.4` (west delegated subnet) on one run and `10.10.0.4` (east delegated subnet) on the next, even though the Key Vault private endpoint is in `vnet-pbinet-dev-east`. **Both are correct. Both prove the private path is being used.** A public IP would be the failure signal.

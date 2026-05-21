@@ -233,58 +233,148 @@ NSPAccessLogs
 
 ---
 
-## Demo Part 4 — Custom code path with App Insights dependency tracking (planned)
+## Demo Part 4 — Dual-region Function Apps with deterministic App Insights dependency tracking
 
-> **Why this part exists.** The Power Apps Key Vault connector runs in the Power Platform service plane and is therefore invisible to a customer-owned Application Insights instance (see the IMPORTANT box at the top of Part 3). To get end-to-end **distributed tracing** — `requests` → `dependencies` to `*.vault.azure.net` — you need code **you instrument**, running on compute **you own**, routed through the **same private endpoint** the connector uses. A small Azure Function App is the lightest way to demonstrate that.
->
-> **Status:** scoped. Bicep + deployment wiring not yet merged. Track in [`expansion-roadmap.md`](../expansion-roadmap.md). Owners on the squad: Trinity (Bicep), Tank (deploy + smoke test), Niobe (this doc).
+**Status:** 📋 Planned / ⚠️ Blocked on VM quota  
+**Commit:** `19b520a` (code complete; live deployment blocked on MCAP sub quota constraint)
 
-### What this demo will prove
+### Intent
 
-1. The **same Key Vault private endpoint** that serves the Power Apps connector also serves a VNet-integrated Function App — no second PE required.
-2. **App Insights dependency tracking lights up** for the custom path. The query that returns zero rows today (`dependencies | where target contains "vault.azure.net"`) will return one row per Function invocation, with `success = true`, `resultCode = 200`, and `target` resolving to a private IP.
-3. **End-to-end correlation** works: a single `operation_Id` ties together the HTTP `requests` row (Function entry) and the `dependencies` row (Key Vault call) so you can demo distributed tracing without a second service.
+The Power Apps Key Vault connector runs in the Power Platform service plane and is therefore invisible to a customer-owned Application Insights instance (see the IMPORTANT box at the top of Part 3). To get end-to-end **distributed tracing** — `requests` → `dependencies` to `*.vault.azure.net` — you need code **you instrument**, running on compute **you own**, routed through the **same private endpoint** the connector uses. A dual-region pair of Azure Function Apps (east + west) solves two problems at once: (1) **App Insights dependency tracking lights up** for the custom code path, and (2) **dual-region deployment provides deterministic proof** that both `snet-funcapp` subnets in both paired regions can reach the same east-region Key Vault private endpoint. Unlike Power Apps connector calls (which distribute non-deterministically across regions), Function Apps under your control provide repeatable evidence of cross-region private paths.
 
-### Target shape
+### Architecture
 
-- **Function App (PowerShell 7.4 or .NET 8 isolated)** with one HTTP trigger that calls `Get-AzKeyVaultSecret` (or `SecretClient.GetSecretAsync`) for `demo-secret`.
-- **System-assigned managed identity** on the Function App, granted `Key Vault Secrets User` on `kv-pbinet-dev-*`.
-- **VNet integration** (regional, outbound) to a new `snet-funcapp` `/27` in `vnet-pbinet-dev-east` — separate from `snet-pp-delegated` (PP owns that delegation) and separate from `snet-pep` (no app workloads in PE subnets).
-- **Private DNS** already covers it: `privatelink.vaultcore.azure.net` is linked to both VNets, so the Function's outbound DNS lookup resolves to the private IP automatically.
-- **Same App Insights instance** (`appi-pbinet-dev`) so existing dashboards and the `dependencies` KQL just start returning rows.
-- **`publicNetworkAccess = Disabled`** on the Function App's inbound surface, with access through a fourth private endpoint on `snet-pep` (so the trigger URL is reachable only from inside the VNet or via a jump host).
+- **Two VNet-integrated Function Apps** — one in eastus `vnet-pbinet-dev-east`, one in westus `vnet-pbinet-dev-west`.
+- **Each Function App** has a system-assigned managed identity with `Key Vault Secrets User` on `kv-pbinet-dev-k6ozyjreme` (deployed in eastus).
+- **Each Function App** is deployed to its own regional App Service Plan (`Standard S1` or `Premium EP1`); VNet-integrated into a new `snet-funcapp` `/27` subnet:
+  - East: `snet-funcapp` (10.10.2.0/27)
+  - West: `snet-funcapp` (10.20.2.0/27)
+- **Both Functions target the same eastus Key Vault** private endpoint:
+  - East Function: intra-region direct path → 10.10.2.X → private endpoint (10.10.1.X) → success
+  - West Function: cross-region via global VNet peering → 10.20.2.X → peering → eastus private endpoint (10.10.1.X) → success
+- **Private DNS** (`privatelink.vaultcore.azure.net` linked to both VNets) ensures both Functions resolve the vault FQDN to the same private IP, regardless of origin region.
+- **Same App Insights instance** (`appi-pbinet-dev`) so the `dependencies` table starts populating with success rows showing each region's Function calling the vault.
 
-### KQL that will start working after Part 4 deploys
+### Code and infrastructure locations
 
-```kusto
-// Run in: appi-pbinet-dev (Application Insights)
-union requests, dependencies
-| where timestamp > ago(30m)
-| where operation_Id in (
-    (requests
-     | where name == "GET /api/GetSecret"
-     | project operation_Id)
-  )
-| project timestamp, itemType, name, target, resultCode, success, duration, operation_Id
-| order by timestamp asc
+| Component | Path | Details |
+|---|---|---|
+| Function App code | `functions/kv-demo/` | PowerShell 7.4 runtime; `GetSecret/run.ps1` calls `Invoke-RestMethod` to KV REST API for `demo-secret` |
+| Function App Bicep module | `infra/modules/funcapp.bicep` | Parameterized for region; sets `REGION` env var and supports `aspSkuName`/`aspSkuTier` |
+| Dual-region main template | `infra/main.bicep` | Extended to emit eastus and westus function app names; regional `snet-funcapp` outputs |
+| Targeted deploy template | `infra/deploy-funcapp-only.bicep` | Resource-group scoped; skips failing sub-resources; safe for quota-constrained scenarios |
+| Deployment + smoke-test script | `scripts/04-deploy-functions.ps1` | Zip-deploys code via ARM (`az functionapp deploy --type zip`); runs smoke tests; emits JSON response |
+
+### Unblock steps
+
+**Current blocker:** MCAP internal subscription (`43d55e51-58fe-486f-9e2a-ba56b8dd15de`) enforces `Total VMs: 0` quota for all App Service Plan SKUs (EP1, S1, B1, P1v2). No function apps currently exist.
+
+**Option 1: Request quota increase (preferred for MCAP sub)**
+
+1. File a support ticket in the MCAP subscription requesting:
+   - "Total VMs" quota increase
+   - Target: 2 vCPU (eastus) + 2 vCPU (westus) minimum
+   - SKU: Standard S1 or Premium EP1
+2. Once approved, proceed to Step 3 below.
+
+**Option 2: Use a Pay-As-You-Go subscription (fast path)**
+
+Deploy to a different subscription that already has App Service Plan compute quota. Both options require adjusting the `--subscription` parameter in the commands below.
+
+**Step 1: Deploy infrastructure (once quota is available)**
+
+```powershell
+az deployment group create `
+  --name funcapp-deploy-$(Get-Date -Format 'yyyyMMddHHmm') `
+  --resource-group rg-pbinet-dev-eastus `
+  --template-file infra/deploy-funcapp-only.bicep `
+  --parameters aspSkuName=S1 aspSkuTier=Standard `
+  --subscription 43d55e51-58fe-486f-9e2a-ba56b8dd15de
 ```
 
-Expected output: paired `requests` + `dependencies` rows per invocation, with the dependency `target` ending in `.vault.azure.net` and `success = true`.
+Expected output: two function app resource IDs (east and west), two App Service Plan IDs, regional `snet-funcapp` subnets allocated.
+
+**Step 2: Deploy function code and run smoke test**
+
+```powershell
+pwsh scripts/04-deploy-functions.ps1 `
+  -Subscription "43d55e51-58fe-486f-9e2a-ba56b8dd15de" `
+  -ResourceGroupEast "rg-pbinet-dev-eastus" `
+  -AspSkuName "S1"
+```
+
+This script will:
+- Zip the `functions/kv-demo/` directory
+- Deploy via `az functionapp deploy --src-path <zip> --type zip` (ARM zip deploy, safe for private SCM)
+- Fallback to Run-from-Package (SAS-signed blob URL in `WEBSITE_RUN_FROM_PACKAGE`) if ARM deploy fails
+- Invoke the smoke test HTTP trigger on both east and west Function Apps
+- Display JSON responses and KQL setup guidance
+
+### Expected outputs
+
+#### Smoke-test JSON response (expected shape; not yet live-verified)
+
+```json
+{
+  "region": "east",
+  "secretFetchedOk": true,
+  "kvHost": "kv-pbinet-dev-k6ozyjreme.vault.azure.net",
+  "timestamp": "2026-05-21T22:14:37Z"
+}
+```
+
+**Expected output — to be replaced with verified rows once deployment is unblocked:**
+
+- East Function call: `"region": "east"`, `"secretFetchedOk": true`
+- West Function call: `"region": "west"`, `"secretFetchedOk": true`
+
+#### Verification KQL Query A: Key Vault audit log (AzureDiagnostics)
+
+Run this in the **Log Analytics workspace** (`law-pbinet-dev-k6ozyjremes6m`):
+
+```kql
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.KEYVAULT"
+| where TimeGenerated > ago(15m)
+| where OperationName == "SecretGet"
+| project TimeGenerated, CallerIPAddress, identity_claim_oid_g, requestUri_s, ResultType
+| order by TimeGenerated desc
+```
+
+**Expected rows (architectural; not yet live-verified):**
+
+| TimeGenerated | CallerIPAddress | ResultType | requestUri_s |
+|---|---|---|---|
+| 2026-05-21T22:XX:XXZ | 10.20.2.X | Success | `https://kv-pbinet-dev-k6ozyjreme.vault.azure.net/secrets/demo-secret/...` |
+| 2026-05-21T22:XX:XXZ | 10.10.2.X | Success | `https://kv-pbinet-dev-k6ozyjreme.vault.azure.net/secrets/demo-secret/...` |
+
+- `10.10.2.X` = east `snet-funcapp` (10.10.2.0/27) outbound SNAT IP
+- `10.20.2.X` = west `snet-funcapp` (10.20.2.0/27) outbound SNAT IP (traverses global VNet peering to reach eastus Key Vault PE)
+
+#### Verification KQL Query B: App Insights dependencies table
+
+Run this in the **Application Insights** resource (`appi-pbinet-dev`):
+
+```kql
+dependencies
+| where timestamp > ago(15m)
+| where target contains "vault.azure.net"
+| project timestamp, cloud_RoleName, name, target, success, duration, resultCode
+| order by timestamp desc
+```
+
+**Expected rows (architectural; not yet live-verified):**
+
+| timestamp | cloud_RoleName | name | target | success | resultCode |
+|---|---|---|---|---|---|
+| 2026-05-21T22:XX:XXZ | func-pbinet-dev-west | GET /secrets/demo-secret | kv-pbinet-dev-k6ozyjreme.vault.azure.net | True | 200 |
+| 2026-05-21T22:XX:XXZ | func-pbinet-dev-east | GET /secrets/demo-secret | kv-pbinet-dev-k6ozyjreme.vault.azure.net | True | 200 |
+
+This closes the **Part 4 gap** identified in [neo-appi-dependencies-clarification.md](./.squad/decisions/inbox/neo-appi-dependencies-clarification.md) — the `dependencies` table returns empty today because no code-side `Invoke-RestMethod` calls Key Vault. The new `GetSecret/run.ps1` makes an explicit REST call which is auto-tracked by the App Insights SDK in the Functions PowerShell runtime.
 
 ### Why not just instrument the Power Apps connector?
 
 You can't. The connector runtime is a managed Microsoft service — there is no hook to attach your App Insights SDK to it. Part 3 (Log Analytics on the Key Vault resource) is the supported way to observe the connector path. Part 4 is the only way to observe a **custom code** path with the same level of detail you'd expect from any other instrumented workload.
-
-### Deployment hand-off
-
-When Trinity merges the Function App Bicep module, this section will be expanded with:
-
-- `infra/modules/funcapp.bicep` parameter table
-- `scripts/01-deploy.sh` additions (`functionAppName` output placeholder)
-- Smoke-test `curl` from the jump host
-- The verified KQL with a screenshot
-
-Until then, treat this as the **planned scope**, and use Part 3 as the authoritative validation for the connector path.
 
 ---
 
