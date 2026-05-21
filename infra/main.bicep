@@ -104,13 +104,30 @@ module network 'modules/network.bicep' = {
   }
 }
 
+// East flow-logs storage — deployed in eastus (must match NetworkWatcher_eastus region).
 module flowLogsStorage 'modules/flow-logs-storage.bicep' = {
   name: 'flowlogs-storage-${prefix}-${env}'
   scope: rg
   params: {
     prefix: prefix
     env: env
-    location: defaultLocation
+    location: defaultLocation  // eastus
+    tags: tags
+  }
+}
+
+// West flow-logs storage — SEPARATE account deployed in westus.
+// Azure requires the storage account to be co-located with the Network Watcher region.
+// Using the east storage account for a west flow log raises InvalidStorageAccountLocation.
+// Deploying this module scoped to NetworkWatcherRG gives a distinct uniqueString so the
+// name does not collide with the east account.
+module flowLogsStorageWest 'modules/flow-logs-storage.bicep' = {
+  name: 'flowlogs-storage-west-${prefix}-${env}'
+  scope: resourceGroup('NetworkWatcherRG')
+  params: {
+    prefix: prefix
+    env: env
+    location: regionB  // westus
     tags: tags
   }
 }
@@ -138,7 +155,8 @@ module flowLogWest 'modules/flow-logs.bicep' = {
     location: regionB
     flowLogName: 'fl-vnet-${prefix}-${env}-west'
     vnetId: network.outputs.vnetWestId
-    storageAccountId: flowLogsStorage.outputs.storageAccountId
+    // West storage account (westus) — required; cannot reuse the east account.
+    storageAccountId: flowLogsStorageWest.outputs.storageAccountId
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
     logAnalyticsWorkspaceRegion: defaultLocation
     logAnalyticsWorkspaceGuid: logAnalytics.outputs.customerId
