@@ -120,3 +120,4 @@ For deeper fixes, see [troubleshooting.md](../troubleshooting.md#403-forbidden-f
 - [Azure Key Vault connector](https://learn.microsoft.com/en-us/connectors/keyvault/)
 - [Virtual network support overview](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview)
 - [Azure Key Vault private link](https://learn.microsoft.com/en-us/azure/key-vault/general/private-link-service)
+- [Focused demo guide (negative test + Power Apps + telemetry evidence)](../demos/keyvault-demo.md)
