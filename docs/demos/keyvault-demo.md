@@ -173,21 +173,9 @@ This success — while Part 1 showed `ForbiddenByConnection` — proves the Mana
 
 ## Demo Part 3 — Evidence the call went through the VNet PE
 
-### App Insights — dependency traces
+> **IMPORTANT:** The Power Apps Key Vault connector runs in the Power Platform service plane, not in your Azure subscription. Its outbound HTTP calls are **NOT visible to a customer-owned Application Insights instance**. App Insights `dependencies` table only records calls from applications you instrument directly (via SDK or auto-instrumentation). Use **Log Analytics workspace** queries instead to validate the private path.
 
-In the Azure portal: **`appi-pbinet-dev`** → **Logs** → run:
-
-```kusto
-dependencies
-| where timestamp > ago(15m)
-| where target contains "vault.azure.net"
-| project timestamp, target, resultCode, duration, cloud_RoleName
-| order by timestamp desc
-```
-
-Expected: a row showing `target = kv-pbinet-dev-k6ozyjreme.vault.azure.net`, `resultCode = 200`.
-
-### KV audit logs — CallerIPAddress confirms private path
+### Query A: Key Vault audit log (every secret read, ~3–5 min latency)
 
 In the Azure portal: **`law-pbinet-dev-k6ozyjremes6m`** (Log Analytics workspace) → **Logs** → run:
 
@@ -196,26 +184,51 @@ AzureDiagnostics
 | where ResourceProvider == "MICROSOFT.KEYVAULT"
 | where TimeGenerated > ago(15m)
 | where OperationName == "SecretGet"
-| project TimeGenerated, CallerIPAddress_s, identity_claim_oid_g, requestUri_s, ResultType
+| project TimeGenerated, CallerIPAddress, identity_claim_oid_g, requestUri_s, ResultType
 | order by TimeGenerated desc
 ```
 
-Expected: `CallerIPAddress_s` is a private IP (starting `10.10.` for the East delegated subnet or `10.20.` for West), **not** a public internet address. This is the definitive proof the request transited the VNet private endpoint.
+**What you'll see:** One row per button press showing `ResultType = Success`.
 
-### NSP audit logs — Network Security Perimeter observability
+**Expected `CallerIPAddress`:** A 10.10.x.x address (the private endpoint NIC in the eastus VNet). **If you see a public IP, the PE/private-DNS path is bypassed.** See [troubleshooting.md](../troubleshooting.md) (being authored in parallel) for resolution steps.
 
-The Network Security Perimeter in Learning mode captures every private endpoint inbound attempt in the `NSPAccessLogs` table. Run this query in the same Log Analytics workspace:
+**Latency:** AzureDiagnostics for Key Vault typically arrives in 3–5 minutes after the operation.
+
+### Query B: NSP private-endpoint capture (audit-only, ~5–15 min latency)
+
+In the same Log Analytics workspace:
 
 ```kusto
 NSPAccessLogs
+| where TimeGenerated > ago(1h)
 | where Category == "NspPrivateInboundAllowed"
-| where TimeGenerated > ago(15m)
-| where ResourceId contains "Microsoft.KeyVault"
-| project TimeGenerated, SourceAddress, DestinationPort, OperationName
+| where ResourceId has "kv-pbinet-dev-k6ozyjreme"
+| project TimeGenerated, SourceIpAddress, ResourceId, AccessMode=tostring(Properties.accessMode)
 | order by TimeGenerated desc
 ```
 
-Expected: One row per button press, showing the private endpoint inbound traffic. Source address should be a private IP from the delegated subnet (10.10.0.x or 10.20.0.x). This confirms NSP in Learning mode is observing the PE traffic without enforcement.
+**What you'll see:** One row per button press showing the private endpoint inbound traffic. `SourceIpAddress` should be a 10.10.x.x address from the delegated subnet.
+
+**Latency:** NSP logs can take 5–15 minutes to arrive. Do not panic if this query returns zero rows in the first 10 minutes.
+
+### If Query A returns nothing
+
+1. **Did you click the Power Apps button?** Go back to Demo Part 2 and press the button again to trigger a `SecretGet` operation.
+2. **Wait 3–5 minutes** for diagnostic ingestion — AzureDiagnostics has this latency by design.
+3. **Confirm KV diagnostic settings target the right LAW.** Run:
+   ```bash
+   az monitor diagnostic-settings list \
+     --resource /subscriptions/43d55e51-58fe-486f-9e2a-ba56b8dd15de/resourceGroups/rg-pbinet-dev-eastus/providers/Microsoft.KeyVault/vaults/kv-pbinet-dev-k6ozyjreme
+   ```
+   Look for `logs[0].category = "AuditEvent"` and `workspaceId = law-pbinet-dev-k6ozyjremes6m`.
+4. **If `CallerIPAddress` is a public IP (not 10.10.x.x):** Private DNS is not resolving. Check that `privatelink.vaultcore.azure.net` private DNS zone is linked to both VNets:
+   ```bash
+   az network private-dns link vnet list \
+     --resource-group rg-pbinet-dev-eastus \
+     --zone-name privatelink.vaultcore.azure.net \
+     --query "[].virtualNetwork.id" -o tsv
+   ```
+   Expected: both `vnet-pbinet-dev-east` and `vnet-pbinet-dev-west` resource IDs.
 
 ---
 

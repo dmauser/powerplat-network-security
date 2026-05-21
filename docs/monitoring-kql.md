@@ -2,9 +2,12 @@
 
 This guide provides ready-to-paste Kusto Query Language (KQL) queries for validating Network Security Perimeter (NSP) audit-mode capture and Azure VNet flow log capture in Log Analytics. Use these queries to verify that private endpoint traffic is being logged correctly and that Power Platform is reaching backend resources through the private path.
 
+> **Important:** Power Apps and Power Automate connectors run in the **Power Platform service plane**, not in your subscription. Their outbound HTTP/database calls are **NOT visible** to a customer-owned Application Insights instance (`dependencies` table in App Insights only records calls from applications you instrument directly). Use **Log Analytics workspace** queries (NSP and flow logs) instead to validate the private path. For Key Vault connector traffic, see **Query Q4** below.
+
 ## Contents
 
 - [Smoke tests (run after deploy)](#smoke-tests-run-after-deploy)
+- [Key Vault audit logs (AzureDiagnostics table)](#key-vault-audit-logs-azurediagnostics-table)
 - [NSP queries (NSPAccessLogs table)](#nsp-queries-nspaccesslogs-table)
 - [Traffic Analytics queries (AzureNetworkAnalytics_CL table)](#traffic-analytics-queries-azurenetworkanalytics_cl-table)
 - [Combined view](#combined-view)
@@ -42,11 +45,49 @@ AzureNetworkAnalytics_CL
 
 ---
 
+## Key Vault audit logs (AzureDiagnostics table)
+
+These queries provide visibility into Key Vault secret reads captured in the AzureDiagnostics table. Use these to confirm that Power Platform connector calls are reaching your Key Vault through the private path and to verify the caller IP is a private address (not public).
+
+### Query Q3: All Key Vault secret reads (last 1 hour)
+
+Shows every secret read operation from the Key Vault audit logs.
+
+```kusto
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.KEYVAULT"
+| where TimeGenerated > ago(1h)
+| where OperationName == "SecretGet"
+| project TimeGenerated, CallerIPAddress, identity_claim_oid_g, requestUri_s, ResultType
+| order by TimeGenerated desc
+```
+
+**Expected result:** One row per Power Platform connector call (e.g., per Power Apps button click or flow run). `ResultType` should be `Success`. `CallerIPAddress` should be a private IP (10.10.x.x for eastus delegated subnet or 10.20.x.x for westus).
+
+**Latency:** AzureDiagnostics for Key Vault typically arrives in 3–5 minutes.
+
+### Query Q4: Key Vault reads with caller identity detail
+
+Provides caller identity, object ID, request details for auditing.
+
+```kusto
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.KEYVAULT"
+| where TimeGenerated > ago(1h)
+| where OperationName == "SecretGet"
+| project TimeGenerated, ResultType, CallerIPAddress, CallerObjectId=identity_claim_oid_g, RequestUri=requestUri_s, HTTPStatusCode=httpStatusCode_d, DurationMs=durationMs_d
+| order by TimeGenerated desc
+```
+
+**Expected result:** Caller details help correlate with flow execution time and identity. If `CallerIPAddress` is a public IP, the PE/private-DNS path is not being used—see troubleshooting.md.
+
+---
+
 ## NSP queries (NSPAccessLogs table)
 
 These queries provide visibility into private endpoint inbound traffic captured by NSP in Learning mode.
 
-### Query Q3: All private endpoint inbound (last 1 hour)
+### Query Q5: All private endpoint inbound (last 1 hour)
 
 Shows all traffic allowed through private endpoints across all associated resources.
 
@@ -60,7 +101,7 @@ NSPAccessLogs
 
 **Expected result:** Traffic originating from Power Platform delegated subnets (10.10.0.0/27 or 10.20.0.0/27) reaching Key Vault, SQL, and Storage private endpoints.
 
-### Query Q4: Private endpoint inbound to Key Vault only (PRIORITY)
+### Query Q6: Private endpoint inbound to Key Vault only (PRIORITY)
 
 Filters NSP logs to show only traffic destined for Key Vault. This is the primary validation query.
 
@@ -75,7 +116,7 @@ NSPAccessLogs
 
 **Expected result:** Power Platform connector calls reaching Key Vault private endpoint. SourceAddress should be a private IP (10.x.x.x) from the delegated subnet. DestinationPort should be 443.
 
-### Query Q5: Private endpoint inbound to SQL Server (last 1 hour)
+### Query Q7: Private endpoint inbound to SQL Server (last 1 hour)
 
 Filters for SQL Server private endpoint traffic.
 
@@ -90,7 +131,7 @@ NSPAccessLogs
 
 **Expected result:** Traffic from delegated subnets to SQL Server PE on port 1433 (or 1438 for named pipes).
 
-### Query Q6: Private endpoint inbound to Storage (last 1 hour)
+### Query Q8: Private endpoint inbound to Storage (last 1 hour)
 
 Filters for Storage Account private endpoint traffic (blob, queue, table, file services).
 
@@ -105,7 +146,7 @@ NSPAccessLogs
 
 **Expected result:** HTTP/HTTPS traffic from delegated subnets to Storage PE on port 443 and 80 (if HTTP is used).
 
-### Query Q7: Would-be denied in Learning mode (baseline for enforcement)
+### Query Q9: Would-be denied in Learning mode (baseline for enforcement)
 
 Shows traffic that would be denied if NSP policy were in Enforced mode. In Learning mode, these are logged but allowed. Use this to establish a baseline before enabling enforcement.
 
@@ -119,7 +160,7 @@ NSPAccessLogs
 
 **Expected result:** Empty or near-empty in baseline mode. Any entries here represent traffic that violates the NSP policy you've defined (if any). Useful to review before switching to Enforced mode.
 
-### Query Q8: Top source private IPs touching perimeter resources (last 1 hour)
+### Query Q10: Top source private IPs touching perimeter resources (last 1 hour)
 
 Ranks the source IPs (should be within delegated subnets) by call volume.
 
@@ -139,7 +180,7 @@ NSPAccessLogs
 
 These queries provide visibility into VNet flow data (aggregated flows) and help confirm that Power Platform is using the private path through the delegated subnets.
 
-### Query Q9: Flows originating from delegated subnets (last 1 hour)
+### Query Q11: Flows originating from delegated subnets (last 1 hour)
 
 Confirms that traffic is flowing from the Power Platform delegated subnets.
 
@@ -153,7 +194,7 @@ AzureNetworkAnalytics_CL
 
 **Expected result:** Flows from the delegated subnets (10.10.0.0/27 or 10.20.0.0/27) to private endpoint subnets (10.10.1.0/27 or 10.20.1.0/27) on port 443 (HTTPS). This proves Power Platform is using the VNet to reach backends.
 
-### Query Q10: Flows from delegated subnet to private endpoint subnet (last 1 hour)
+### Query Q12: Flows from delegated subnet to private endpoint subnet (last 1 hour)
 
 Confirms that Power Platform is reaching the private endpoint subnet specifically (where KV, SQL, and Storage PEs are located).
 
@@ -168,7 +209,7 @@ AzureNetworkAnalytics_CL
 
 **Expected result:** `FlowStatus_s` should be "A" (allowed). `DestPort_d` should be 443 (HTTPS) for KV/SQL/Storage private endpoints. This confirms the private path is working.
 
-### Query Q11: Top talkers from delegated subnets (last 1 hour)
+### Query Q13: Top talkers from delegated subnets (last 1 hour)
 
 Ranks the source IPs within delegated subnets by the volume of outbound traffic, helping identify active connectors.
 
@@ -182,7 +223,7 @@ AzureNetworkAnalytics_CL
 
 **Expected result:** A few source IPs (typically UAMI or managed identity IP ranges within the delegated subnet) generating traffic. BytesSent and FlowCount increase with connector activity.
 
-### Query Q12: Flows to public IPs from delegated subnets (egress leakage check, last 1 hour)
+### Query Q14: Flows to public IPs from delegated subnets (egress leakage check, last 1 hour)
 
 Detects any traffic from the delegated subnets to public (non-Azure) IPs. Should be minimal or empty (only expected Azure service IPs).
 
