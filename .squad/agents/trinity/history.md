@@ -48,6 +48,21 @@
 **Success criteria:**
 - SQL Server appears in `rg-pbinet-dev-eastus`
 - PE-SQL deployed with IP in `snet-pep` (10.10.1.x/27)
+
+## Session: 2026-05-21 — Coordinator Planning + Trinity Part 4 Scoping
+
+**Task:** Document Part 4 expansion scope (Function App + Cosmos DB connector scenario).
+
+**Part 4 Ownership for Trinity:**
+- **Module:** `infra/modules/funcapp.bicep` — Azure Functions host with VNet integration to `snet-pp-delegated` (same pattern as Managed Environment, enabling private Cosmos DB connector calls)
+- **Bicep skeleton:** App Service Plan (dynamic tier), Function App with VNet integration, system-managed identity, private endpoint for Cosmos DB (follow existing PE pattern from keyvault.bicep + storage.bicep)
+- **Outputs:** funcAppId, funcAppName, cosmosDbPeId (for cross-doc linking and NSP association candidate)
+- **Link from:** `docs/expansion-roadmap.md` → `infra/modules/funcapp.bicep` (TBD)
+- **Post-deployment:** Tank scripts `07-*` will include Function App startup and Cosmos DB connector smoke test
+
+**Expected delivery:** Phase 4 (after Part 3 completion + NSP validation)
+
+**Pattern:** Reuse the approved VNet integration + PE + private DNS + NSP association pattern from KV/SQL/Storage for consistency.
 - DNS A record in `privatelink.database.windows.net` → PE-SQL private IP
 - SQL diagnostic settings (`diag-sql`) created and streaming to LAW
 - `.azure/last-deploy-outputs.json` contains non-empty `sqlServerFqdn` + `sqlDatabaseName`

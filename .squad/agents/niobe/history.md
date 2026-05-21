@@ -67,3 +67,45 @@ Current (incorrect): "PE–KV, PE–SQL, PE–Storage — diagnosticSettings wit
 Updated (correct): "Private Endpoint metrics are monitored via Azure Monitor Metrics blade. Azure platform does NOT support `Microsoft.Insights/diagnosticSettings` for `microsoft.network/privateendpoints` (`ResourceTypeNotSupported`). See `infra/modules/private-endpoint.bicep` inline comment for details. Metric used: `PEConnectionsConnected` (active connection count)."
 
 **Rationale:** Neo's audit confirmed this is a known Azure platform limitation. The Bicep module already documents it with inline comments. The decisions.md table must be corrected to close the discrepancy.
+
+## Session: 2026-05-21 — Coordinator Inline Edits (Dual-Subnet + Part 4 Scope)
+
+**Task:** Finalize dual-subnet documentation sections + planned Part 4 scope (stress testing, performance profiling).
+
+**Scope:** 3 files, inline edits
+
+**Ownership:**
+- **docs/architecture.md:** Dual-subnet section (VNet topology, delegated subnet motivation, paired-region requirement, private DNS zone linkage pattern). Added mermaid sequence diagram (Power Platform → AAD → VNet → PE → Key Vault) showing the complete private path from app to resource.
+- **docs/demos/keyvault-demo.md:** Part 3 IP range fix (corrected 10.10.x.x CIDR to 10.10.0.0/16 for eastus; 10.20.0.0/16 for westus per deploy outputs). Added Part 4 planned section (scope: connector throughput stress test, latency profiling, sustained call patterns).
+- **docs/expansion-roadmap.md:** New entry for Function App + Cosmos DB connector scenario. Includes ARM template skeleton, Power Automate flow scaffold, and cross-links to docs/connectors/cosmosdb-future.md (TBD).
+
+**Key Pattern:** Dual-subnet architecture doc now clearly distinguishes:
+1. **Required network scope:** Paired-region VNets (eastus + westus) with snet-pp-delegated + snet-pep + dual private DNS zones + enterprise policy referencing both subnets.
+2. **Deployment choice:** Shared PaaS resources (KV, SQL, Storage) can be in either region or separate — this is parameterized, not baked into the architecture.
+
+**Diagram (mermaid seq):**
+```
+Power Apps->>Azure AD: Authenticate (tenant)
+Azure AD-->>Power Apps: Token
+Power Apps->>VNet (PE subnet): Call Key Vault connector
+VNet (PE subnet)->>Private Endpoint: Resolve vault.azure.net (private DNS)
+Private Endpoint->>Key Vault: HTTPS 443 (private path)
+Key Vault-->>Private Endpoint: Secret value
+Private Endpoint-->>Power Apps: Return secret
+```
+
+**Cross-Links Updated:**
+- architecture.md → demos/keyvault-demo.md (Part 3 validation steps)
+- keyvault-demo.md → monitoring-kql.md (NSP PE inbound validation query)
+- expansion-roadmap.md → (future connectors)
+
+**Commit:** 366a7ef (coordinator-direct, 3 files, +119 lines)
+
+**Verification:**
+- ✅ All relative links verified
+- ✅ Mermaid diagram renders correctly
+- ✅ IP ranges consistent with `.azure/last-deploy-outputs.json`
+- ✅ No broken cross-references
+- ✅ git status clean
+
+**Pattern Extracted:** Architecture documentation must pair the **required topology** (what must be the same across all deployments) with the **deployment choices** (what operators can parameterize). The dual-subnet section exemplifies this: eastus + westus + snet-pp-delegated + snet-pep are required; the location of KV/SQL/Storage is a choice.

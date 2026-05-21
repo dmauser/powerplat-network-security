@@ -67,3 +67,22 @@
 ## Team Update — 2026-05-21T19:30:00Z
 
 **KV demo RBAC automation baked into deploy script:** `scripts/01-deploy.sh` now auto-resolves signed-in user OID and injects via `--demo-user-oid` flag; grants `Key Vault Secrets User` role on demo vault automatically. Supports `--no-auto-demo-user` to suppress.
+
+## Session: 2026-05-21 — Coordinator Planning + Tank Part 4 Scoping
+
+**Task:** Document Part 4 expansion scope (stress testing, performance profiling).
+
+**Part 4 Ownership for Tank:**
+- **Script wiring:** Update `scripts/01-deploy.sh` to include Function App deployment (once Trinity delivers `infra/modules/funcapp.bicep`) and surface Function App outputs (funcAppId, funcAppName) to `.azure/last-deploy-outputs.json`
+- **Smoke test script:** Create `scripts/07-funcapp-stress-test.sh` — scenario runner for Part 4:
+  - Load Function App with high-frequency Cosmos DB connector calls
+  - Measure latency distribution (p50/p95/p99)
+  - Capture traffic through NSP logs and flow analytics
+  - Produce perf dashboard JSON with metrics (RPS, latency, CPU%, memory%)
+  - Success criteria: sustained throughput without PP throttling
+- **Telemetry:** Integrate with `scripts/04-enable-connector-telemetry.ps1` pattern to auto-enable Function App insights collection
+- **Ownership:** Tank scripts `01-deploy.sh` (wiring) + `07-*` (stress test + perf validation)
+
+**Expected delivery:** Phase 4 (after Part 3 completion + NSP validation)
+
+**Pattern:** Reuse Tank's idempotent script pattern (`.azure/last-deploy-outputs.json` input, helm-like structured output, graceful skip for conditional features).
