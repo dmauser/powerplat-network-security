@@ -1,17 +1,17 @@
-# Monitoring private endpoint traffic
+# Network observability and monitoring
 
-This guide shows Azure and Power Platform operators how to monitor traffic flowing from Power Platform Managed Environments to Azure private resources through private endpoints over delegated subnets. Telemetry is essential to verify that requests are using the private path (not public), to catch denied public attempts, and to validate that DNS resolution and private endpoint health are stable.
+This guide documents how to capture and analyze private endpoint inbound traffic (via Network Security Perimeter in Learning mode) and VNet flows (via Traffic Analytics) to verify that Power Platform reaches private Azure resources through delegated subnets only. NSP in Learning mode observes traffic without enforcing restrictions, while VNet flow logs and Traffic Analytics provide layer 3–4 visibility into all flows. Together, they enable operators to audit and troubleshoot the private path.
 
 ## Contents
 
-- [What gets logged](#what-gets-logged)
-- [Architecture of the telemetry flow](#architecture-of-the-telemetry-flow)
-- [Key questions and KQL queries](#key-questions-and-kql-queries)
-- [Setting up dashboards](#setting-up-dashboards)
-- [Alerts](#alerts)
-- [Troubleshooting flow](#troubleshooting-flow)
-- [Cost note](#cost-note)
-- [References](#references)
+- [Network Security Perimeter in Learning mode](#network-security-perimeter-in-learning-mode)
+- [VNet flow logs and Traffic Analytics](#vnet-flow-logs-and-traffic-analytics)
+- [Cost expectations](#cost-expectations)
+- [Starter KQL queries](#starter-kql-queries)
+- [Architecture diagram](#architecture-diagram)
+- [Verification steps](#verification-steps)
+- [Troubleshooting decision tree](#troubleshooting-decision-tree)
+- [Learn more](#learn-more)
 
 ## What gets logged
 

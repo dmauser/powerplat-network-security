@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Purpose: Validate that the deployed services are locked down publicly and that Azure-side Private Link DNS wiring matches the expected private endpoint IPs.
-# Usage: ./scripts/03-validate-network.sh
-# Args: none
+# Usage: ./scripts/03-validate-network.sh [--check-logs]
+# Args: --check-logs (optional) — also validate NSP and flow log capture in Log Analytics
 
 GREEN='\033[1;32m'
 RED='\033[1;31m'
@@ -139,6 +139,62 @@ probe_sql_public_denial() {
   return 1
 }
 
+check_nsp_logs() {
+  local workspace_id="$1"
+  local exit_code=0
+
+  require_command az
+
+  echo
+  echo 'Checking NSP and flow log capture in Log Analytics...'
+  echo '(Note: NSP logs may take 5-15 minutes to appear; flow logs take ~10 minutes.)'
+  echo
+
+  # Q1: Check NSPAccessLogs count in last 1 hour
+  local nsp_count
+  nsp_count="$(az monitor log-analytics query \
+    --workspace "$workspace_id" \
+    --analytics-query "NSPAccessLogs | where TimeGenerated > ago(1h) | count" \
+    --query '[0]' \
+    -o tsv 2>/dev/null || echo '0')"
+
+  if [[ "$nsp_count" -gt 0 ]]; then
+    ok "NSPAccessLogs: ${nsp_count} entries in last 1 hour"
+  else
+    echo "⚠ NSPAccessLogs: no entries in last 1 hour (may be due to log latency or no traffic)"
+  fi
+
+  # Q2: Check AzureNetworkAnalytics_CL (flow logs) count in last 1 hour
+  local flow_count
+  flow_count="$(az monitor log-analytics query \
+    --workspace "$workspace_id" \
+    --analytics-query "AzureNetworkAnalytics_CL | where TimeGenerated_t > ago(1h) | count" \
+    --query '[0]' \
+    -o tsv 2>/dev/null || echo '0')"
+
+  if [[ "$flow_count" -gt 0 ]]; then
+    ok "AzureNetworkAnalytics_CL: ${flow_count} entries in last 1 hour"
+  else
+    echo "⚠ AzureNetworkAnalytics_CL: no entries in last 1 hour (may be due to flow processing delay or minimal traffic)"
+  fi
+
+  # Q4: Check for KV-specific PE inbound
+  local kv_count
+  kv_count="$(az monitor log-analytics query \
+    --workspace "$workspace_id" \
+    --analytics-query "NSPAccessLogs | where TimeGenerated > ago(1h) and Category == 'NspPrivateInboundAllowed' and ResourceId contains 'Microsoft.KeyVault' | count" \
+    --query '[0]' \
+    -o tsv 2>/dev/null || echo '0')"
+
+  if [[ "$kv_count" -gt 0 ]]; then
+    ok "NSP Key Vault PE inbound: ${kv_count} allowed entries in last 1 hour"
+  else
+    echo "⚠ NSP Key Vault PE inbound: no entries in last 1 hour (verify traffic is flowing from Managed Environment)"
+  fi
+
+  return "$exit_code"
+}
+
 assert_zone_links() {
   local resource_group="$1"
   local zone_name="$2"
@@ -188,6 +244,22 @@ main() {
   local exit_code=0
   local delegated_vnet_ids_raw
   local -a delegated_vnet_ids=()
+  local check_logs_flag=false
+  local law_workspace_id
+
+  # Parse command-line arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --check-logs)
+        check_logs_flag=true
+        shift
+        ;;
+      *)
+        fail "Unknown argument: $1"
+        exit 1
+        ;;
+    esac
+  done
 
   require_command jq
   require_command az
@@ -203,6 +275,7 @@ main() {
   sql_fqdn="$(jq -r '.sqlServerFqdn.value' "$OUTPUTS_FILE")"
   sql_database_name="$(jq -r '.sqlDatabaseName.value' "$OUTPUTS_FILE")"
   sql_server_name="${sql_fqdn%%.database.windows.net}"
+  law_workspace_id="$(jq -r '.logAnalyticsWorkspaceId.value // empty' "$OUTPUTS_FILE")"
 
   kv_id="$(az keyvault show -n "$kv_name" --query id -o tsv | tr -d '\r')"
   sql_id="$(lookup_resource_id "$sql_server_name" 'Microsoft.Sql/servers')"
@@ -307,6 +380,16 @@ main() {
   assert_equals 'Key Vault publicNetworkAccess' "$kv_pna" 'Disabled' || exit_code=1
   assert_equals 'SQL Server publicNetworkAccess' "$sql_pna" 'Disabled' || exit_code=1
   assert_equals 'Storage account publicNetworkAccess' "$storage_pna" 'Disabled' || exit_code=1
+
+  # Optional: Check NSP and flow log capture if --check-logs flag is set
+  if [[ "$check_logs_flag" == true ]]; then
+    if [[ -n "$law_workspace_id" ]]; then
+      check_nsp_logs "$law_workspace_id" || exit_code=1
+    else
+      fail "--check-logs requested but logAnalyticsWorkspaceId not found in deployment outputs"
+      exit_code=1
+    fi
+  fi
 
   echo
   echo 'Managed Environment runtime reminder:'

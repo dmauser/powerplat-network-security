@@ -1,0 +1,7 @@
+docs(demos): correct KV connector formula to single-arg GetSecret
+
+- GetSecret takes only secretName; vault name is bound at connection
+- Add "create connection first" callout in Step 3
+- Troubleshooting: red underline on namespace vs args
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>

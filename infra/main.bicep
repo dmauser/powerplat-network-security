@@ -62,6 +62,18 @@ module logAnalytics 'modules/logAnalytics.bicep' = {
   }
 }
 
+module nsp 'modules/nsp.bicep' = {
+  name: 'nsp-${prefix}-${env}'
+  scope: rg
+  params: {
+    prefix: prefix
+    env: env
+    location: defaultLocation
+    tags: tags
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+  }
+}
+
 // Application Insights — workspace-based, linked to the LAW above.
 // Provides Power Platform telemetry correlation (Managed Environment → LAW).
 module appInsights 'modules/appInsights.bicep' = {
@@ -86,6 +98,49 @@ module network 'modules/network.bicep' = {
     regionB: regionB
     tags: tags
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+  }
+}
+
+module flowLogsStorage 'modules/flow-logs-storage.bicep' = {
+  name: 'flowlogs-storage-${prefix}-${env}'
+  scope: rg
+  params: {
+    prefix: prefix
+    env: env
+    location: defaultLocation
+    tags: tags
+  }
+}
+
+module flowLogEast 'modules/flow-logs.bicep' = {
+  name: 'flowlog-east-${prefix}-${env}'
+  scope: resourceGroup('NetworkWatcherRG')
+  params: {
+    location: regionA
+    flowLogName: 'fl-vnet-${prefix}-${env}-east'
+    vnetId: network.outputs.vnetEastId
+    storageAccountId: flowLogsStorage.outputs.storageAccountId
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+    logAnalyticsWorkspaceRegion: defaultLocation
+    logAnalyticsWorkspaceGuid: logAnalytics.outputs.customerId
+    tags: tags
+    networkWatcherName: 'NetworkWatcher_${regionA}'
+  }
+}
+
+module flowLogWest 'modules/flow-logs.bicep' = {
+  name: 'flowlog-west-${prefix}-${env}'
+  scope: resourceGroup('NetworkWatcherRG')
+  params: {
+    location: regionB
+    flowLogName: 'fl-vnet-${prefix}-${env}-west'
+    vnetId: network.outputs.vnetWestId
+    storageAccountId: flowLogsStorage.outputs.storageAccountId
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+    logAnalyticsWorkspaceRegion: defaultLocation
+    logAnalyticsWorkspaceGuid: logAnalytics.outputs.customerId
+    tags: tags
+    networkWatcherName: 'NetworkWatcher_${regionB}'
   }
 }
 
@@ -150,6 +205,46 @@ module storage 'modules/storage.bicep' = if (deployStorage) {
     uamiPrincipalId: managedIdentity.outputs.userAssignedIdentityPrincipalId
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
+}
+
+module nspAssociationKv 'modules/nsp-association.bicep' = {
+  name: 'nsp-assoc-kv-${prefix}-${env}'
+  scope: rg
+  params: {
+    nspName: nsp.outputs.nspName
+    profileName: nsp.outputs.nspProfileName
+    targetResourceId: keyVault.outputs.keyVaultId
+    associationName: 'assoc-kv'
+  }
+}
+
+module nspAssociationSql 'modules/nsp-association.bicep' = if (deploySql) {
+  name: 'nsp-assoc-sql-${prefix}-${env}'
+  scope: rg
+  params: {
+    nspName: nsp.outputs.nspName
+    profileName: nsp.outputs.nspProfileName
+    targetResourceId: sql!.outputs.sqlServerId
+    associationName: 'assoc-sql'
+  }
+  dependsOn: [
+    nspAssociationKv
+  ]
+}
+
+module nspAssociationStorage 'modules/nsp-association.bicep' = if (deployStorage) {
+  name: 'nsp-assoc-storage-${prefix}-${env}'
+  scope: rg
+  params: {
+    nspName: nsp.outputs.nspName
+    profileName: nsp.outputs.nspProfileName
+    targetResourceId: storage!.outputs.storageAccountId
+    associationName: 'assoc-storage'
+  }
+  dependsOn: [
+    nspAssociationKv
+    if (deploySql) nspAssociationSql
+  ]
 }
 
 module keyVaultPrivateEndpoint 'modules/private-endpoint.bicep' = {
@@ -235,9 +330,12 @@ module alerts 'modules/alerts.bicep' = {
 output enterprisePolicyArmId string = enterprisePolicy.outputs.enterprisePolicyArmId
 output keyVaultName string = keyVault.outputs.keyVaultName
 output keyVaultUri string = keyVault.outputs.keyVaultUri
+output nspName string = nsp.outputs.nspName
+output nspId string = nsp.outputs.nspId
 output sqlServerFqdn string = deploySql ? sql!.outputs.sqlServerFqdn : ''
 output sqlDatabaseName string = deploySql ? sql!.outputs.sqlDatabaseName : ''
 output storageAccountName string = deployStorage ? storage!.outputs.storageAccountName : ''
+output flowLogsStorageName string = flowLogsStorage.outputs.storageAccountName
 output userAssignedIdentityResourceId string = managedIdentity.outputs.userAssignedIdentityResourceId
 output userAssignedIdentityPrincipalId string = managedIdentity.outputs.userAssignedIdentityPrincipalId
 output vnetEastId string = network.outputs.vnetEastId

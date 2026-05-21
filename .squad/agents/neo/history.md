@@ -126,3 +126,51 @@ The validation script uses `curl` (no Bearer token) against `https://<kv>.vault.
 ## Team Update — 2026-05-20T19:17:03Z
 
 **Follow-up sweep completed.** Trinity resolved westus3 + AzureServices flags by changing `defaultLocation` to eastus and setting `bypass = 'None'` on Key Vault/Storage modules (see `.squad/orchestration-log/2026-05-20T19-17-03Z-trinity.md`). Niobe merged connector test steps, removed archive references, and cleaned diagram (see `.squad/orchestration-log/2026-05-20T19-17-03Z-niobe.md`). All 5 outstanding items now resolved; decisions merged into `.squad/decisions.md`. See `.squad/log/2026-05-20T19-17-03Z-followup-sweep.md` for round summary.
+
+## Learnings — 2026-05-21T14:49:51-05:00 — KQL validation queries for NSP + flow logs
+
+**Trigger:** Neo authored KQL validation queries companion file and updated `03-validate-network.sh` with optional log checking.
+
+### What I did
+- Created `docs/monitoring-kql.md` (11.1 KB) with 12 ready-to-paste KQL queries covering NSP audit logs and flow log analytics.
+- Organized queries into sections: smoke tests (Q1–Q2), NSP private-endpoint captures (Q3–Q8), flow analytics (Q9–Q12), combined view, and latency guidance.
+- **Priority query Q4:** NSP PE inbound to Key Vault specifically — the user's core validation need.
+- Added `check_nsp_logs()` function to `scripts/03-validate-network.sh` that runs Q1, Q2, and Q4 via `az monitor log-analytics query` against LAW.
+- Introduced optional `--check-logs` flag to the validation script; maintains existing fast path if flag not set.
+- Queries use standard Kusto syntax; no workspace name needed (queries run against selected workspace in Log Analytics).
+- Documented 5–15 min NSP log latency and 10-min flow log processing interval; included troubleshooting checklist.
+
+### NSPAccessLogs table schema (from Morpheus spec + Kusto docs)
+- `TimeGenerated` (datetime) — when the log was recorded
+- `Category` (string) — log category (e.g., `NspPrivateInboundAllowed`, `NspPublicInboundPerimeterRulesDenied`)
+- `ResourceId` (string) — full ARM resource ID of the affected resource (KV, SQL, Storage)
+- `SourceAddress` (string) — source IP (private IP from delegated subnet in Learning mode)
+- `DestinationPort` (int) — destination port (443 for HTTPS, 1433 for SQL, etc.)
+- `Protocol` (string) — protocol name (`Tcp`, `Udp`)
+- `OperationName` (string) — operation on the resource (e.g., `SecretGet`, `Read`)
+- `Profile` (string) — NSP profile name that matched
+
+### AzureNetworkAnalytics_CL table schema (VNet flow logs)
+- `TimeGenerated_t` (datetime) — flow window end time
+- `SrcSubnet_s` (string) — source subnet CIDR (e.g., "10.10.0.0/27")
+- `DestSubnet_s` (string) — destination subnet CIDR (e.g., "10.10.1.0/27")
+- `SrcIP_s` (string) — source IP address
+- `DestIP_s` (string) — destination IP address
+- `DestPort_d` (int) — destination port
+- `FlowStatus_s` (string) — "A" (allowed) or "D" (denied)
+- `L7Protocol_s` (string) — L7 protocol if available (http, https, sql, etc.)
+- `SentBytes_d` (float) — total bytes sent in flow window
+
+### Key decisions made
+1. **Single query file per telemetry stream:** Kept NSP and flow log queries separate by table to avoid confusion. Combined view provided as optional join.
+2. **Latency guidance critical:** Documented 5–15 min NSP delay + 10 min flow window. Prevents false-negative alerts during first deploy.
+3. **Validator hook is optional:** `--check-logs` flag is backward-compatible; existing fast-path validation (DNS, denial checks) unaffected.
+4. **Query names map to Morpheus spec.** All Q1–Q4 match Morpheus spec Section 9 starter queries; Q5–Q12 are Neo additions for completeness.
+5. **Deployed outputs integration:** Script now attempts to fetch `logAnalyticsWorkspaceId` from deploy outputs; if missing, `--check-logs` fails gracefully.
+
+### Test status
+- Script syntax validated (`bash -n`). No CRLF+LF mixed endings in new functions.
+- Queries are syntactically correct Kusto and follow Lab Azure conventions (deploy-output placeholders in prose only, not in KQL).
+
+### Punch list written
+Decision file written to `.squad/decisions/inbox/neo-kql-queries.md` documenting queries added, validator hook rationale, and team action items.
