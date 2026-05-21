@@ -335,16 +335,22 @@ module alerts 'modules/alerts.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
-// Part 4 — Function App (VNet-integrated, App Insights dependency tracking)
+// Part 4 — Function App (dual-region, deterministic east/west demo)
+//
+// Both functions target the SAME East KV. West function reaches it via global
+// VNet peering → east KV private endpoint. KV AzureDiagnostics shows:
+//   east call → CallerIPAddress = 10.10.2.x
+//   west call → CallerIPAddress = 10.20.2.x
 // ---------------------------------------------------------------------------
 
-module funcApp 'modules/funcapp.bicep' = if (deployFunctionApp) {
-  name: 'funcapp-${prefix}-${env}'
+module funcAppEast 'modules/funcapp.bicep' = if (deployFunctionApp) {
+  name: 'funcapp-east-${prefix}-${env}'
   scope: rg
   params: {
     prefix: prefix
     env: env
-    location: defaultLocation
+    regionSuffix: 'east'
+    location: regionA
     tags: tags
     funcSubnetId: network.outputs.subnetEastFuncAppId
     appInsightsName: appInsights.outputs.appInsightsName
@@ -353,48 +359,111 @@ module funcApp 'modules/funcapp.bicep' = if (deployFunctionApp) {
   }
 }
 
-// Inbound private endpoint for the Function App (sites sub-resource).
-module funcAppPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
-  name: 'pe-func-${prefix}-${env}'
+module funcAppWest 'modules/funcapp.bicep' = if (deployFunctionApp) {
+  name: 'funcapp-west-${prefix}-${env}'
   scope: rg
   params: {
-    name: 'pep-func-${prefix}-${env}'
+    prefix: prefix
+    env: env
+    regionSuffix: 'west'
+    location: regionB
+    tags: tags
+    funcSubnetId: network.outputs.subnetWestFuncAppId
+    appInsightsName: appInsights.outputs.appInsightsName
+    // West function intentionally targets the EAST Key Vault.
+    // Traffic routes: west func → global VNet peering → east KV private endpoint.
+    // This proves cross-region private connectivity and produces distinct CallerIPAddress
+    // values in KV AzureDiagnostics (10.10.2.x vs 10.20.2.x).
+    keyVaultName: keyVault.outputs.keyVaultName
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+  }
+}
+
+// Inbound PE for east Function App — lands in east snet-pep.
+module funcAppEastPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-func-east-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-func-east-${prefix}-${env}'
     location: regionA
     tags: tags
     subnetId: network.outputs.subnetEastPepId
-    targetResourceId: funcApp!.outputs.functionAppResourceId
+    targetResourceId: funcAppEast!.outputs.functionAppResourceId
     groupId: 'sites'
     privateDnsZoneId: privateDns.outputs.websitesZoneId
   }
 }
 
-// Private endpoint for the Function App runtime storage — blob sub-resource.
-// Reuses the existing privatelink.blob.core.windows.net zone.
-module funcStorageBlobPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
-  name: 'pe-funcstg-blob-${prefix}-${env}'
+// Inbound PE for west Function App — lands in west snet-pep.
+module funcAppWestPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-func-west-${prefix}-${env}'
   scope: rg
   params: {
-    name: 'pep-funcstg-blob-${prefix}-${env}'
+    name: 'pep-func-west-${prefix}-${env}'
+    location: regionB
+    tags: tags
+    subnetId: network.outputs.subnetWestPepId
+    targetResourceId: funcAppWest!.outputs.functionAppResourceId
+    groupId: 'sites'
+    privateDnsZoneId: privateDns.outputs.websitesZoneId
+  }
+}
+
+// East function storage — blob PE in east snet-pep.
+module funcStorageEastBlobPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-funcstg-blob-east-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-funcstg-blob-east-${prefix}-${env}'
     location: regionA
     tags: tags
     subnetId: network.outputs.subnetEastPepId
-    targetResourceId: funcApp!.outputs.funcStorageAccountId
+    targetResourceId: funcAppEast!.outputs.funcStorageAccountId
     groupId: 'blob'
     privateDnsZoneId: privateDns.outputs.blobZoneId
   }
 }
 
-// Private endpoint for the Function App runtime storage — file sub-resource.
-// Uses the new privatelink.file.core.windows.net zone added to private-dns.bicep.
-module funcStorageFilePrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
-  name: 'pe-funcstg-file-${prefix}-${env}'
+// East function storage — file PE in east snet-pep.
+module funcStorageEastFilePrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-funcstg-file-east-${prefix}-${env}'
   scope: rg
   params: {
-    name: 'pep-funcstg-file-${prefix}-${env}'
+    name: 'pep-funcstg-file-east-${prefix}-${env}'
     location: regionA
     tags: tags
     subnetId: network.outputs.subnetEastPepId
-    targetResourceId: funcApp!.outputs.funcStorageAccountId
+    targetResourceId: funcAppEast!.outputs.funcStorageAccountId
+    groupId: 'file'
+    privateDnsZoneId: privateDns.outputs.fileZoneId
+  }
+}
+
+// West function storage — blob PE in west snet-pep.
+module funcStorageWestBlobPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-funcstg-blob-west-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-funcstg-blob-west-${prefix}-${env}'
+    location: regionB
+    tags: tags
+    subnetId: network.outputs.subnetWestPepId
+    targetResourceId: funcAppWest!.outputs.funcStorageAccountId
+    groupId: 'blob'
+    privateDnsZoneId: privateDns.outputs.blobZoneId
+  }
+}
+
+// West function storage — file PE in west snet-pep.
+module funcStorageWestFilePrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-funcstg-file-west-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-funcstg-file-west-${prefix}-${env}'
+    location: regionB
+    tags: tags
+    subnetId: network.outputs.subnetWestPepId
+    targetResourceId: funcAppWest!.outputs.funcStorageAccountId
     groupId: 'file'
     privateDnsZoneId: privateDns.outputs.fileZoneId
   }
@@ -420,7 +489,10 @@ output logAnalyticsWorkspaceId string = logAnalytics.outputs.workspaceId
 output appInsightsName string = appInsights.outputs.appInsightsName
 output appInsightsConnectionString string = appInsights.outputs.appInsightsConnectionString
 
-// Part 4 Function App outputs
-output functionAppName string = deployFunctionApp ? funcApp!.outputs.functionAppName : ''
-output functionAppHostname string = deployFunctionApp ? funcApp!.outputs.functionAppHostname : ''
-output funcSubnetId string = network.outputs.subnetEastFuncAppId
+// Part 4 Function App outputs — east and west
+output functionAppEastName string = deployFunctionApp ? funcAppEast!.outputs.functionAppName : ''
+output functionAppEastHostname string = deployFunctionApp ? funcAppEast!.outputs.functionAppHostname : ''
+output functionAppWestName string = deployFunctionApp ? funcAppWest!.outputs.functionAppName : ''
+output functionAppWestHostname string = deployFunctionApp ? funcAppWest!.outputs.functionAppHostname : ''
+output funcSubnetEastId string = network.outputs.subnetEastFuncAppId
+output funcSubnetWestId string = network.outputs.subnetWestFuncAppId

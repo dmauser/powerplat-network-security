@@ -23,6 +23,9 @@ param prefix string
 @description('Environment suffix used for resource names.')
 param env string
 
+@description('Region suffix used to disambiguate dual-region deployments (e.g., "east" or "west"). Appended to resource names to prevent collisions when both regions deploy into the same resource group.')
+param regionSuffix string
+
 @description('Azure region for the Function App deployment.')
 param location string
 
@@ -52,10 +55,11 @@ var storageAccountContributorRoleDefinitionId  = '17d1049b-9a84-46fb-8f53-869881
 // Resource names
 // ---------------------------------------------------------------------------
 // Function storage: must be globally unique, 3-24 lowercase alphanumeric.
-// 'func' infix disambiguates from the demo storage account (st{prefix}{env}...).
-var funcStorageAccountName = toLower(take('st${prefix}${env}func${uniqueString(resourceGroup().id)}', 24))
-var appServicePlanName     = 'asp-${prefix}-${env}-func'
-var funcAppName            = 'func-${prefix}-${env}'
+// regionSuffix ('east'/'west') disambiguates the two instances in the same RG.
+// Pattern: stfunc{regionSuffix}{uniqueString} — max 23 chars (well within the 24 limit).
+var funcStorageAccountName = toLower(take('stfunc${regionSuffix}${uniqueString(resourceGroup().id)}', 24))
+var appServicePlanName     = 'asp-${prefix}-${env}-${regionSuffix}'
+var funcAppName            = 'func-${prefix}-${env}-${regionSuffix}'
 
 // ---------------------------------------------------------------------------
 // Existing resource references

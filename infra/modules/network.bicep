@@ -108,6 +108,24 @@ resource vnetWest 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           privateEndpointNetworkPolicies: 'Disabled'
         }
       }
+      {
+        // snet-funcapp: /27 for Function App regional VNet integration.
+        // Range 10.20.2.0/27 — does not collide with snet-pp-delegated (10.20.0.0/27)
+        // or snet-pep (10.20.1.0/27). Delegated to Microsoft.Web/serverFarms (required
+        // for Elastic Premium regional VNet integration in westus).
+        name: funcAppSubnetName
+        properties: {
+          addressPrefix: '10.20.2.0/27'
+          delegations: [
+            {
+              name: 'func-delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
+        }
+      }
     ]
   }
 }
@@ -147,6 +165,7 @@ output subnetWestDelegatedId string = resourceId('Microsoft.Network/virtualNetwo
 output subnetEastPepId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetEast.name, privateEndpointSubnetName)
 output subnetWestPepId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetWest.name, privateEndpointSubnetName)
 output subnetEastFuncAppId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetEast.name, funcAppSubnetName)
+output subnetWestFuncAppId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetWest.name, funcAppSubnetName)
 
 // VNet diagnostics — AllMetrics covers VMProtectionAlerts and byte counters.
 resource vnetEastDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
