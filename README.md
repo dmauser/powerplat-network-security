@@ -79,6 +79,9 @@ pwsh ./scripts/02-configure-pp-vnet.ps1 -EnvironmentId <your-env-guid>
 # 3. Validate
 ./scripts/03-validate-network.sh
 
+# (Optional) Run VNet diagnostic scenarios from the delegated subnet
+pwsh ./scripts/06-network-diagnostics.ps1 -Scenario All
+
 # 4. Build a flow following one of the connector guides:
 #    docs/connectors/keyvault.md       (primary use case)
 #    docs/connectors/sql.md

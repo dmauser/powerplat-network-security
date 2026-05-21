@@ -227,6 +227,7 @@ main() {
   echo
   echo "Summary: validated az ${MIN_AZ_VERSION}+, pwsh ${MIN_PWSH_VERSION}+, bicep, jq, and bash; verified provider registrations for Microsoft.PowerPlatform, Microsoft.Sql, Microsoft.KeyVault, Microsoft.Storage, Microsoft.Network, and Microsoft.Insights; enabled ${PP_FEATURE_NAME} for ${PP_FEATURE_RESOURCE_TYPE}; ensured ${NSP_FEATURE_NAMESPACE}/${NSP_FEATURE_NAME} is active for NSP preview deployments."
   echo 'Next: run ./scripts/01-deploy.sh'
+  warn 'Network diagnostics: after deployment and subnet injection are complete, run `pwsh ./scripts/06-network-diagnostics.ps1 -Scenario All` to validate the VNet path end-to-end.'
   warn 'Microsoft.NetworkAnalytics is not required; Traffic Analytics auto-provisions its NetworkMonitoring solution and AzureNetworkAnalytics_CL data path after the first processed flow-log batch.'
   warn 'If a shell script still fails in your environment, verify it is checked out with LF line endings and executable permissions.'
 }
