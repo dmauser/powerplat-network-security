@@ -257,8 +257,10 @@ New IaC modules deliver Log Analytics workspace (LAW) + diagnostic settings + al
 | Key Vault | `AuditEvent`, `AzurePolicyEvaluationDetails` | `AllMetrics` |
 | Storage blob | `StorageRead`, `StorageWrite`, `StorageDelete` | `Transaction` |
 | SQL Database | `SQLSecurityAuditEvents`, `Errors`, `Timeouts` | `Basic`, `InstanceAndAppAdvanced` |
-| PE–KV, PE–SQL, PE–Storage | _(none)_ | `AllMetrics` |
+| PE–KV, PE–SQL, PE–Storage | _(none)_ | **Metrics only** (see note below) |
 | VNet eastus, VNet westus | _(none)_ | `AllMetrics` |
+
+> **Private Endpoint Diagnostic Settings Limitation (CORRECTED — 2026-05-21T23:45:18-05:00):** Azure platform does **NOT** support `Microsoft.Insights/diagnosticSettings` on `microsoft.network/privateendpoints` resource type. API returns `ResourceTypeNotSupported`. PE telemetry is available via Azure Monitor **Metrics** blade only (metric: `PEConnectionsConnected` shows active connection count). See `infra/modules/private-endpoint.bicep` inline documentation. The `diagnosticSettings.bicep` module was updated to skip PE resources; PE health is verified through the Metrics visual and KQL queries in `docs/monitoring.md`.
 
 **Canonical output names (LOCKED — no renaming without coordination):**
 - `logAnalyticsWorkspaceName` — workspace human-readable name
@@ -579,6 +581,121 @@ Even with BAP REST, the call still requires `ManageProtectionKeys` permission. U
 Currently has only: **Global Reader** (read-only).
 
 **Unblock remains:** Obtain breakglass account credentials; grant Power Platform Administrator role via Entra ID.
+
+---
+
+---
+
+## Phase 2 Validation Summary (Neo, 2026-05-21T04:33:00Z)
+
+### Overall Verdict: ✅ PASS (with deferred items)
+
+All Azure network plumbing checks pass. Two items explicitly deferred per Option B decisions. One script bug requires fix before CI use.
+
+### Pass / Gap / Deferred Counts
+
+| Category | Count |
+|---|---|
+| ✅ PASS | 20 |
+| ⚠️ Expected / Known State | 2 (EP healthStatus, script bug) |
+| Deferred — Option B | 1 (SQL all-up) |
+| Deferred — manual | 1 (AI → ME) |
+| ❌ GAP (blockers) | **0** |
+
+### Key Validation Evidence
+
+**Private Endpoint + DNS A Records Match:**
+| Resource | PE NIC IP | DNS A IP | Match |
+|---|---|---|---|
+| Key Vault | `10.10.1.4` | `10.10.1.4` | ✅ |
+| Storage Blob | `10.10.1.5` | `10.10.1.5` | ✅ |
+
+**Public Access Denial (authenticated KV):**
+```
+ERROR: (Forbidden) Connection is not an approved private link...
+Code: ForbiddenByConnection
+```
+
+**Enterprise Policy ARM Properties (both VNets linked):**
+```json
+"networkInjection": {
+  "virtualNetworks": [
+    { "id": "...vnet-pbinet-dev-east", "subnet": { "name": "snet-pp-delegated" } },
+    { "id": "...vnet-pbinet-dev-west", "subnet": { "name": "snet-pp-delegated" } }
+  ]
+}
+```
+
+**20 PASS items:** KV public denial, Storage public denial, PE NIC IPs (KV+Storage), DNS A records (KV+Storage), delegation (East+West), EP references both VNets, DNS zones linked (3 zones × 2 VNets), diagnostic settings (KV+Storage+VNet+LAW), App Insights workspace, public access disabled (KV+Storage).
+
+**2 Deferred items:**
+1. **SQL:** Option B deferred (East US capacity)
+2. **AI → ME binding:** Manual PPAC step (no BAP API path exists)
+
+### Script Bug Action Items
+
+| Priority | File | Symptom | Fix |
+|---|---|---|---|
+| P1 | `scripts/03-validate-network.sh` | CRLF line endings + bash brace parse error | `sed -i 's/\r//' ...` + rewrite `probe_sql_public_denial()` |
+| P2 | `scripts/03-validate-network.sh` | KV probe expects 403 but gets 401 | Replace curl-based probe with `az keyvault secret list` authenticated call |
+
+### Recommended Next Actions
+
+| Priority | Owner | Action |
+|---|---|---|
+| P1 | Neo / Trinity | Fix 3 bugs in `scripts/03-validate-network.sh` |
+| P2 | Tank | Bind App Insights to Default ME via PPAC |
+| P3 | Tank / maker | Run connector smoke tests (KV, Blob, Custom HTTP) |
+| P4 | Tank | Verify demo artifacts: `demo-secret`, `demo/hello.txt` exist |
+| P5 | Trinity | Deploy SQL when East US capacity available |
+
+---
+
+## Phase 2 Completion Handoff (Niobe, 2026-05-21T23:45:18-05:00)
+
+### Lab Completion Checklist Delivered
+
+**New document:** `docs/lab-completion-checklist.md` (8 sections, 10.7 KB)
+
+**Structure:**
+1. Deployment summary table (Phase 1/2 ✅, Phase 3 ⏳, SQL 🔴)
+2. Validation results (20 PASS / 0 GAP / 2 deferred)
+3. Remaining manual steps:
+   - **Step 1:** App Insights binding via PPAC (`admin.powerplatform.microsoft.com → Manage → Data export → App Insights`)
+   - **Step 2:** KV connector smoke test + KQL verification
+   - **Step 3:** Blob connector smoke test + verification
+   - **Step 4:** SQL deferred re-enablement paths
+4. Deferred items table
+5. Re-run validation instructions
+6. Troubleshooting decision tree with cross-links
+
+**Key Features:**
+- All resource names resolved from `.azure/last-deploy-outputs.json`
+- Exact PPAC click paths
+- KQL queries for trace verification in Application Insights
+- SQL Option A (eastus2) and Option B (retry eastus) paths
+
+### README.md & Decisions.md Updates
+
+**README.md:**
+- Added status section (Phase 1/2 ✅, Phase 3 ⏳, SQL 🔴)
+- Added lab completion checklist to docs index
+
+**decisions.md (this file):**
+- Corrected PE diagnostic settings table (2026-05-21T23:45:18-05:00)
+- **CORRECTION:** Azure platform does NOT support `microsoft.network/privateendpoints` diagnostic settings. PE telemetry available via Azure Monitor Metrics blade only (metric: `PEConnectionsConnected`).
+
+### Documentation Verification
+
+✅ All 14 markdown docs scanned; 0 broken relative links  
+✅ `docs/architecture.md` reviewed for drift; no changes required  
+✅ All resource names align with deploy outputs  
+
+### Decision Flags
+
+- **Lab readiness:** Phase 1+2 complete; Phase 3 manual steps unblocked and well-documented
+- **PE diagnostic correction:** Closes discrepancy between docs and platform reality
+- **Handoff clarity:** Lab completion doc provides exact paths and resource names
 
 ---
 

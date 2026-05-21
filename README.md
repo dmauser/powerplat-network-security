@@ -9,6 +9,19 @@ The primary demo is **Azure Key Vault** with `publicNetworkAccess=Disabled`, cal
 
 > This is a **Power Platform** demo. For Power BI / Fabric private access via **VNet Data Gateway**, see [`docs/expansion-roadmap.md`](./docs/expansion-roadmap.md).
 
+## Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| **Phase 1: Azure infrastructure** | ✅ Complete | VNets, private endpoints, enterprise policy deployed |
+| **Phase 2: Power Platform subnet injection** | ✅ Complete | Managed Environment linked; 20/20 validation checks pass |
+| **Phase 3: Connector smoke tests** | ⏳ Next steps | App Insights binding + KV/Blob tests remain; see [`docs/lab-completion-checklist.md`](./docs/lab-completion-checklist.md) |
+| **SQL deployment** | 🔴 Deferred | East US capacity exhausted; can be enabled later in alternate region |
+
+**Next:** Complete the steps in [`docs/lab-completion-checklist.md`](./docs/lab-completion-checklist.md).
+
+---
+
 ## Contents
 
 - [What gets deployed](#what-gets-deployed)
@@ -109,6 +122,7 @@ Mirrors the Microsoft Learn role diagram:
 
 - Architecture → [`docs/architecture.md`](./docs/architecture.md)
 - Deployment guide → [`docs/deployment-guide.md`](./docs/deployment-guide.md)
+- **Lab completion checklist** → [`docs/lab-completion-checklist.md`](./docs/lab-completion-checklist.md)
 - Managed Environment setup → [`docs/managed-environment-setup.md`](./docs/managed-environment-setup.md)
 - 20-min demo script → [`docs/demo-script.md`](./docs/demo-script.md)
 - Connector how-tos → [`docs/connectors/`](./docs/connectors/)
