@@ -1,0 +1,11 @@
+{
+  "assignments": [
+    {
+      "assignment_id": "powerplat-network-security-2026-05-20",
+      "created_at": "2026-05-20",
+      "universe": "The Matrix",
+      "agents": ["morpheus", "trinity", "tank", "neo", "niobe"],
+      "rationale_redacted": true
+    }
+  ]
+}

@@ -1,9 +1,33 @@
 # Squad Decisions
 
-**Last Updated:** 2026-05-20T21:48:40-05:00  
-**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion + Phase 2 attempt #2 (Trial env blocker + BAP REST confirmation)
+**Last Updated:** 2026-05-21T04:20:00Z  
+**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion + Phase 2 attempt #2 (Trial env blocker + BAP REST confirmation) + Phase 2 success (ME linked, App Insights binding blocked)
 
-## Architecture & Scope
+## Phase 2 Outcome (Tank, 2026-05-21T04:20:00Z)
+
+### 🟢 ME Linked to Enterprise Policy (SUCCEEDED)
+
+**Environment:** `Default-ebf541ac-cacf-4a40-b46e-1accc3810ef8` ("Contoso (default)")  
+**Enterprise Policy:** `ep-pbinet-dev` (ARM ID in `.azure/last-deploy-outputs.json`)  
+**Method:** BAP REST bypass (direct `POST .../enterprisePolicies/NetworkInjection/link`)  
+**Lifecycle op:** `NewNetworkInjection: Succeeded` (op `0ce043ef`, 2026-05-21T04:05:12Z)  
+**Confirmed idempotent:** Re-run → `SwapNetworkInjection: Succeeded` (op `68dc19ad`)
+
+**New prerequisite discovered:** Default PP environments require governance tier upgrade from `Basic` → `Standard` before `NewNetworkInjection` is allowed. `scripts/02-configure-pp-vnet.ps1` now includes this step automatically via `Set-AdminPowerAppEnvironmentGovernanceConfiguration`.
+
+**ARM healthStatus:** Remains `Undetermined` — expected. Authoritative confirmation is the BAP lifecycle op state, not ARM healthStatus.
+
+### 🔴 App Insights Binding — No Automated Path
+
+`applicationInsightsId` and related fields do not exist in `EnvironmentProperties` on any
+BAP API version (2016-11-01 through 2024-05-01). All REST PATCH attempts return `400 InvalidRequestContent`. The earlier decision entry (2026-05-20T15:36:31-05:00) claiming REST PATCH works was incorrect.
+
+**Current state:** Binding must be configured manually via PPAC admin center:
+**admin.powerplatform.microsoft.com → Environments → Settings → Product → Features → Application Insights**
+
+`scripts/02-configure-pp-vnet.ps1` AI binding section updated to skip and print PPAC portal instructions.
+
+---
 
 ### US Paired-Region Scope (Morpheus decision)
 

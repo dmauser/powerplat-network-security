@@ -358,6 +358,43 @@ try {
         throw "Environment already has a different subnet injection policy linked: $currentPolicyArmId. This script does not swap policies automatically. Use Enable-SubnetInjection -Swap intentionally if you mean to replace it."
     }
 
+    # ---------------------------------------------------------------------------
+    # Governance tier pre-check
+    #
+    # Default PP environments have protectionLevel=Basic. This blocks
+    # NewNetworkInjection with 400 GovernanceConfig. The environment must be
+    # upgraded to Standard via the dedicated governance endpoint BEFORE the
+    # Enable-SubnetInjection call. Direct PATCH to scopes/admin/environments
+    # returns 204 but silently makes no change; the PowerApps admin module is
+    # required.
+    # ---------------------------------------------------------------------------
+    $ppAdminModule = 'Microsoft.PowerApps.Administration.PowerShell'
+    if (-not (Get-Module -ListAvailable -Name $ppAdminModule)) {
+        Write-Host "Installing $ppAdminModule for governance tier check..."
+        Install-Module $ppAdminModule -Scope CurrentUser -AllowClobber -Force -ErrorAction Stop
+    }
+    Import-Module $ppAdminModule -ErrorAction Stop
+
+    try {
+        Add-PowerAppsAccount -ErrorAction SilentlyContinue
+    } catch { }
+
+    $envDetails = Get-AdminPowerAppEnvironment -EnvironmentName $EnvironmentId -ErrorAction Stop
+    $govTier = [string]$envDetails.Internal.properties.governanceConfiguration.protectionLevel
+    Write-Host "Governance tier           : $govTier"
+
+    if ($govTier -ne 'Standard') {
+        Write-Host "Upgrading governance tier to Standard (required for VNet injection)..."
+        Set-AdminPowerAppEnvironmentGovernanceConfiguration `
+            -EnvironmentName $EnvironmentId `
+            -UpdatedGovernanceConfiguration @{ protectionLevel = 'Standard' } `
+            -ErrorAction Stop
+        Write-Host "Governance upgrade submitted. Waiting 60 seconds for propagation..."
+        Start-Sleep -Seconds 60
+        Write-Host "Governance upgrade complete."
+    }
+    # ---------------------------------------------------------------------------
+
     $enableArguments = Get-EnterprisePoliciesCommandArguments -Command $enableCommand -Arguments @{
         EnvironmentId = $EnvironmentId
         PolicyArmId   = $policyArmId
@@ -379,80 +416,34 @@ try {
     # ---------------------------------------------------------------------------
     # Application Insights binding
     #
-    # Set-AdminPowerAppEnvironmentApplicationInsights does not exist in
-    # Microsoft.PowerPlatform.EnterprisePolicies v0.17.0 or
-    # Microsoft.PowerApps.Administration.PowerShell. Fall back to the
-    # Power Platform admin REST API.
+    # ⚠️  AUTOMATED BINDING NOT AVAILABLE
     #
-    # API: PATCH https://api.bap.microsoft.com/providers/
-    #        Microsoft.BusinessAppPlatform/scopes/admin/environments/{id}
-    #      ?api-version=2023-06-01
-    # Body: { "properties": { "applicationInsightsId": "...",
-    #                          "applicationInsightsKey": "<connectionString>" } }
+    # The BAP admin REST API does NOT expose 'applicationInsightsId' or related
+    # fields in EnvironmentProperties on any tested api-version (2016-11-01
+    # through 2024-05-01). All PATCH attempts return:
+    #   400 InvalidRequestContent: Could not find member 'applicationInsightsId'
+    #       on object of type 'EnvironmentProperties'
+    #
+    # Microsoft.PowerApps.Administration.PowerShell has no App Insights cmdlets.
+    #
+    # Configure App Insights binding manually via the PPAC admin center:
+    #   admin.powerplatform.microsoft.com
+    #   → Environments → <your environment> → Settings → Product → Features
+    #   → Application Insights
     #
     # Reference: https://learn.microsoft.com/en-us/power-platform/admin/app-insights-overview
     # ---------------------------------------------------------------------------
 
-    if ([string]::IsNullOrWhiteSpace($appInsightsResourceId)) {
+    if (-not [string]::IsNullOrWhiteSpace($appInsightsResourceId)) {
         Write-Host ''
-        Write-Host 'Application Insights outputs not found in deploy outputs — skipping AI binding.' -ForegroundColor Yellow
-        Write-Host '  Deploy with deployMonitoring=true (and logAnalyticsWorkspaceId set) to enable.'
-    }
-    else {
+        Write-Host 'Application Insights binding requires manual configuration.' -ForegroundColor Yellow
+        Write-Host '  Automated REST binding is not available — the BAP EnvironmentProperties' -ForegroundColor Yellow
+        Write-Host '  schema does not expose applicationInsightsId in any current API version.' -ForegroundColor Yellow
         Write-Host ''
-        Write-Host "Configuring Application Insights binding for environment $EnvironmentId ..."
-        Write-Host "  App Insights resource ID : $appInsightsResourceId"
-
-        # Acquire a Power Apps bearer token using the current Azure CLI session.
-        $ppTokenResult = az account get-access-token --resource 'https://service.powerapps.com/' --output json 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($ppTokenResult)) {
-            throw 'Unable to acquire a Power Apps bearer token. Ensure az login is complete and the account has PP admin rights.'
-        }
-        $ppToken = ($ppTokenResult | ConvertFrom-Json).accessToken
-
-        $bapBase = 'https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments'
-        $apiVersion = '2023-06-01'
-        $envUri = "$bapBase/$([Uri]::EscapeDataString($EnvironmentId))?api-version=$apiVersion"
-
-        $headers = @{
-            Authorization  = "Bearer $ppToken"
-            'Content-Type' = 'application/json'
-        }
-
-        # Read current binding for idempotency check.
-        $currentEnv = Invoke-RestMethod -Uri $envUri -Method Get -Headers $headers -ErrorAction Stop
-        $currentAiId = [string]$currentEnv.properties.applicationInsightsId
-
-        if ($currentAiId -ieq $appInsightsResourceId) {
-            Write-Host '  Application Insights already bound to this resource — no change applied.' -ForegroundColor Yellow
-        }
-        else {
-            if (-not [string]::IsNullOrWhiteSpace($currentAiId)) {
-                Write-Host "  Replacing existing AI binding: $currentAiId"
-            }
-
-            # Use connection string as the key value (modern PP telemetry pipeline).
-            # The 'applicationInsightsKey' field accepts either the instrumentation key
-            # (legacy) or the full connection string. The connection string is preferred
-            # for workspace-based App Insights.
-            $aiKeyValue = if (-not [string]::IsNullOrWhiteSpace($appInsightsConnectionString)) {
-                $appInsightsConnectionString
-            } else {
-                $appInsightsInstrumentationKey
-            }
-
-            $patchBody = @{
-                properties = @{
-                    applicationInsightsId  = $appInsightsResourceId
-                    applicationInsightsKey = $aiKeyValue
-                }
-            } | ConvertTo-Json -Depth 5 -Compress
-
-            $null = Invoke-RestMethod -Uri $envUri -Method Patch -Headers $headers -Body $patchBody -ErrorAction Stop
-
-            Write-Host '  Application Insights bound successfully.' -ForegroundColor Green
-            Write-Host "  Resource ID : $appInsightsResourceId"
-        }
+        Write-Host '  Configure via PPAC admin center:' -ForegroundColor Yellow
+        Write-Host '    admin.powerplatform.microsoft.com → Environments → Settings → Product → Features → Application Insights' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host "  Target App Insights resource: $appInsightsResourceId" -ForegroundColor Yellow
     }
 
     Show-NextSteps

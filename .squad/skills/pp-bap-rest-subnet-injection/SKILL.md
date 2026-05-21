@@ -23,6 +23,42 @@ The module falls through to interactive browser auth, hanging in non-interactive
 
 The BAP REST API (`api.bap.microsoft.com`) supports the same enterprise policy link operation. It authenticates with `service.powerapps.com` tokens, which `az account get-access-token` CAN acquire non-interactively using the current az CLI session.
 
+### Step 0 — Ensure governance tier is Standard (PREREQUISITE)
+
+Default PP environments start with `protectionLevel: "Basic"`. This blocks `NewNetworkInjection`
+with `400 InvalidLifecycleOperationRequest: ... governance configuration`. Check and upgrade
+before attempting the link.
+
+```powershell
+# Install once; v2.0.217+ required
+Install-Module Microsoft.PowerApps.Administration.PowerShell -Scope CurrentUser -AllowClobber -Force
+
+Import-Module Microsoft.PowerApps.Administration.PowerShell
+Add-PowerAppsAccount   # uses ambient cached credentials; no -AccessToken parameter in v2.0.217
+
+$envId = "Default-<tenantId>"
+
+# Check current tier
+$env = Get-AdminPowerAppEnvironment -EnvironmentName $envId
+$tier = $env.Internal.properties.governanceConfiguration.protectionLevel
+Write-Host "Current protectionLevel: $tier"
+
+if ($tier -ne 'Standard') {
+    Set-AdminPowerAppEnvironmentGovernanceConfiguration `
+        -EnvironmentName $envId `
+        -UpdatedGovernanceConfiguration @{ protectionLevel = "Standard" }
+    # Returns 202 Accepted; waits for EnableGovernanceConfiguration lifecycle op to Succeed (~30-60s)
+    Write-Host "Governance tier upgraded to Standard. Waiting 60s for propagation..."
+    Start-Sleep -Seconds 60
+}
+```
+
+**Key constraint:** Direct PATCH to `scopes/admin/environments` with `protectionLevel: "Standard"`
+returns 204 but silently makes NO change. Only the dedicated `governanceConfiguration` endpoint
+(called by `Set-AdminPowerAppEnvironmentGovernanceConfiguration`) actually upgrades the tier.
+
+---
+
 ### Step 1 — Acquire BAP token
 
 ```powershell
@@ -64,27 +100,42 @@ if ($opLocation) {
     do {
         Start-Sleep -Seconds 10
         $poll = Invoke-RestMethod -Uri $opLocation -Headers @{ Authorization = "Bearer $token" } -ErrorAction Stop
-        Write-Host "  status: $($poll.status ?? $poll.operationStatus)"
-    } while ($poll.status -notin @('Succeeded','Failed','Canceled') -and $poll.operationStatus -notin @('Succeeded','Failed'))
+        $pollState = $poll.state.id   # BAP lifecycle op uses state.id, not status/operationStatus
+        Write-Host "  state: $pollState  type: $($poll.type.id)"
+    } while ($pollState -notin @('Succeeded','Failed','Canceled'))
     
-    if ($poll.status -eq 'Succeeded' -or $poll.operationStatus -eq 'Succeeded') {
-        Write-Host "Link succeeded"
+    if ($pollState -eq 'Succeeded') {
+        Write-Host "Link $($poll.type.id) succeeded (op: $($poll.id))"
+        # type.id = "NewNetworkInjection" on first link, "SwapNetworkInjection" on re-runs
     } else {
         throw "Link operation failed: $($poll | ConvertTo-Json -Compress)"
     }
 }
 ```
 
-### Step 5 — Verify EP healthStatus transitions
+### Step 5 — Verify link state
 
-```bash
-az resource show \
-  --ids <epArmId> \
-  --api-version 2020-10-30-preview \
-  --query "{healthStatus: properties.healthStatus}" \
-  -o json
-# Expected after successful link: "healthStatus": "Running"
+**Do NOT use the GET endpoint** — `GET .../enterprisePolicies/NetworkInjection?api-version=2019-10-01`
+returns 404 regardless of link state. Use the lifecycle op result:
+
+- `type.id = "NewNetworkInjection"` + `state.id = "Succeeded"` → first successful link
+- `type.id = "SwapNetworkInjection"` + `state.id = "Succeeded"` → idempotent re-link (link already existed)
+
+**Confirm via allowed ops:**
+
+```powershell
+$env = Invoke-RestMethod `
+    -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments/$envId/lifecycleOperationsEnforcement?api-version=2019-10-01" `
+    -Headers @{ Authorization = "Bearer $token" }
+$env.allowedOperations.type.id   # Should include SwapNetworkInjection, RevertNetworkInjection
+$env.disallowedOperations.type.id   # NewNetworkInjection should NOT appear here
 ```
+
+**ARM healthStatus** (`az resource show ... --query "properties.healthStatus"`) may remain
+`Undetermined` for an extended period after a successful link. Transition to `Running`
+requires PP control plane to establish VNet infrastructure and may only occur when ME
+workloads actively use VNet injection. `Undetermined` is NOT a failure when the lifecycle
+op shows `Succeeded`.
 
 ---
 
@@ -92,22 +143,30 @@ az resource show \
 
 | Constraint | Detail |
 |---|---|
+| **Governance tier prerequisite** | Default environments have `protectionLevel: "Basic"`. This blocks `NewNetworkInjection` with `400 GovernanceConfig`. Upgrade to `Standard` via `Set-AdminPowerAppEnvironmentGovernanceConfiguration` (see Step 0) before the link call. Direct PATCH to `scopes/admin/environments` silently does nothing. |
 | **Environment type** | Trial environments return `400 InvalidLifecycleOperationRequest: NewNetworkInjection cannot be performed on environment of type Trial.` Only Default, Production, Sandbox, Developer types work. |
 | **ManageProtectionKeys** | Account must have **Power Platform Administrator** Entra role (tenant-wide) OR **System Administrator** Dataverse role (env-scope). `403 EnvironmentAccess / UserMissingRequiredPermission` means this is missing. |
 | **SystemId ≠ ARM ID** | The link body field is `SystemId`, not the ARM resource ID. Always resolve from `az resource show --query "properties.systemId"`. Example: `/regions/unitedstates/providers/Microsoft.PowerPlatform/enterprisePolicies/<guid>` |
 | **api-version** | Use `2019-10-01` for the link call. Newer versions may not be routed correctly for this specific path. |
 | **Content-Type** | Use `-ContentType "application/json"` with `Invoke-WebRequest`. Setting it in `-Headers` only can produce `415 UnsupportedMediaType`. |
-| **healthStatus timing** | The ARM resource `healthStatus` transitions from `Undetermined` → `Running` only after a successful link AND after PP control plane has processed the association. May take 1-5 minutes. |
-| **Idempotency** | If the same EP is already linked, the POST returns `400 InvalidLifecycleOperationRequest` with `SwapNetworkInjection` in the message (policy already linked). Check `GET /environments/{id}/enterprisePolicies/NetworkInjection` first. |
+| **Lifecycle op state field** | Poll result uses `state.id` (not `status` or `operationStatus`). Valid terminal values: `Succeeded`, `Failed`, `Canceled`. |
+| **Idempotency — re-link = swap** | If the same EP is already linked, re-submitting the link POST returns 202 and completes as `SwapNetworkInjection: Succeeded` (NOT a 400 error). This makes the call fully idempotent. |
+| **GET endpoint returns 404** | `GET .../enterprisePolicies/NetworkInjection?api-version=2019-10-01` always returns 404. Use the lifecycle op result (`type.id` + `state.id`) to confirm link state. |
+| **healthStatus timing** | ARM `healthStatus` may remain `Undetermined` indefinitely after a successful link. It is NOT a reliable success indicator. Use the lifecycle op state. |
 
 ---
 
 ## Related BAP API Calls
 
 ```powershell
-# Check current linked EP on an environment
+# List lifecycle ops enforcement (allowed/disallowed operations)
 Invoke-RestMethod `
-    -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments/$envId/enterprisePolicies/NetworkInjection?api-version=2019-10-01" `
+    -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments/$envId/lifecycleOperationsEnforcement?api-version=2019-10-01" `
+    -Headers @{ Authorization = "Bearer $token" }
+
+# Get lifecycle op status (use operation-location from the link 202 response)
+Invoke-RestMethod `
+    -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/lifecycleOperations/<opId>?api-version=2019-10-01" `
     -Headers @{ Authorization = "Bearer $token" }
 
 # List all environments (non-admin, sees envs you have access to)
@@ -120,6 +179,8 @@ Invoke-RestMethod `
     -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments/$envId?api-version=2016-11-01" `
     -Headers @{ Authorization = "Bearer $token" }
 ```
+
+**Note:** `GET .../enterprisePolicies/NetworkInjection` returns 404 regardless of link state. Do not use it as a pre-check.
 
 ---
 

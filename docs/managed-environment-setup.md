@@ -8,6 +8,7 @@ This walkthrough explains how to prepare the Power Platform side of the lab befo
 - [Prerequisites](#prerequisites)
 - [Create or select a United States environment](#create-or-select-a-united-states-environment)
 - [Promote the environment to Managed Environment](#promote-the-environment-to-managed-environment)
+- [Upgrade the governance tier to Standard](#upgrade-the-governance-tier-to-standard)
 - [Find the environment ID](#find-the-environment-id)
 - [Validate the region with PowerShell](#validate-the-region-with-powershell)
 - [Next step](#next-step)
@@ -47,6 +48,28 @@ Recommendations for this lab:
 5. Save the change and wait for the environment status to finish updating.
 
 After this step, the environment is eligible for the subnet injection linkage described in [deployment-guide.md](./deployment-guide.md).
+
+## Upgrade the governance tier to Standard
+
+Default Power Platform environments are created with `protectionLevel: Basic`. The VNet
+injection operation (`NewNetworkInjection`) is blocked by the Power Platform control plane
+until the governance tier is upgraded to **Standard**. If you skip this step, `./scripts/02-configure-pp-vnet.ps1` will attempt the upgrade automatically, but you can also perform it manually:
+
+```powershell
+Install-Module Microsoft.PowerApps.Administration.PowerShell -Scope CurrentUser -AllowClobber -Force
+Import-Module Microsoft.PowerApps.Administration.PowerShell
+Add-PowerAppsAccount
+
+Set-AdminPowerAppEnvironmentGovernanceConfiguration `
+    -EnvironmentName "<environmentId>" `
+    -UpdatedGovernanceConfiguration @{ protectionLevel = "Standard" }
+```
+
+Wait approximately 60 seconds for the `EnableGovernanceConfiguration` lifecycle operation
+to complete. You can verify the result in the [Power Platform admin center](https://admin.powerplatform.microsoft.com/)
+under **Environments → Settings → Managed Environment**.
+
+> **Note:** Attempting to upgrade the tier by PATCHing `scopes/admin/environments` directly returns 204 but makes no change. The dedicated governance configuration endpoint, called by `Set-AdminPowerAppEnvironmentGovernanceConfiguration`, is required. This is not documented in the standard VNet support setup guide ([learn.microsoft.com/power-platform/admin/vnet-support-setup-configure](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-setup-configure)) but is a confirmed prerequisite for environments starting at the Basic tier.
 
 ## Find the environment ID
 
