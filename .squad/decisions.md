@@ -1,7 +1,7 @@
 # Squad Decisions
 
-**Last Updated:** 2026-05-20T21:06:15-05:00  
-**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion
+**Last Updated:** 2026-05-20T21:48:40-05:00  
+**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion + Phase 2 attempt #2 (Trial env blocker + BAP REST confirmation)
 
 ## Architecture & Scope
 
@@ -499,6 +499,62 @@ Write-Host "operation-location: $($resp.Headers['operation-location'])"
 
 # Poll operation-location until status=Succeeded
 ```
+
+### Phase 2 Attempt #2 — Trial Environment Rejection (Tank, 2026-05-20T21:48:40-05:00)
+
+**Status:** **STILL BLOCKED** (same root cause: role assignment missing)  
+**New Blocker Discovered:** Initial `EnvironmentId` was Trial type
+
+#### Critical Finding: Environment Type Mismatch
+
+Tank attempted with user-provided `EnvironmentId c5c98bd4-4de7-ef58-81d3-870bbc85f605`. BAP returns:
+
+```
+400 InvalidLifecycleOperationRequest: NewNetworkInjection cannot be performed on environment of type Trial
+```
+
+**Root cause:** Trial environments are hard-blocked from network injection. Only **Default**, **Production**, **Sandbox**, and **Developer** types support it.
+
+**Verified Correct Environment:**
+- `Default-ebf541ac-cacf-4a40-b46e-1accc3810ef8` (type=Default, protected, display="Contoso (default)")
+- Dataverse already provisioned → operation code is `SwapNetworkInjection` (not `NewNetworkInjection`)
+- Same BAP REST endpoint works for both
+
+#### BAP REST Bypass Confirmed Viable
+
+The `Microsoft.PowerPlatform.EnterprisePolicies` module v0.17.0 cannot work non-interactively with AccessToken-bridged Az contexts. Tank confirmed direct BAP REST is viable:
+
+```powershell
+# Step 1: Get BAP token
+$token = (az account get-access-token --resource 'https://service.powerapps.com/' --output json | ConvertFrom-Json).accessToken
+
+# Step 2: Get EP systemId (NOT ARM ID)
+$epArmId = "/subscriptions/43d55e51-58fe-486f-9e2a-ba56b8dd15de/resourceGroups/rg-pbinet-dev/providers/Microsoft.PowerPlatform/enterprisePolicies/ep-pbinet-dev"
+$epSystemId = (az resource show --ids $epArmId --api-version 2020-10-30-preview --query "properties.systemId" -o tsv)
+# Result: /regions/unitedstates/providers/Microsoft.PowerPlatform/enterprisePolicies/09c8ad9a-...
+
+# Step 3: POST link
+$envId = "Default-ebf541ac-cacf-4a40-b46e-1accc3810ef8"
+$body = @{ SystemId = $epSystemId } | ConvertTo-Json -Compress
+$response = Invoke-WebRequest `
+    -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments/$envId/enterprisePolicies/NetworkInjection/link?api-version=2019-10-01" `
+    -Method Post `
+    -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } `
+    -Body $body
+# Returns 202 Accepted with operation-location header
+```
+
+**Documented in:** `.squad/skills/pp-bap-rest-subnet-injection/SKILL.md` (complete reference with constraints table, async polling, idempotency checks).
+
+#### Remaining Blocker: ManageProtectionKeys Permission
+
+Even with BAP REST, the call still requires `ManageProtectionKeys` permission. User `admin@MngEnvMCAP423074.onmicrosoft.com` (OID: `7b5e0f11-5e99-4008-a136-9e42428f73e7`) must have:
+- **Power Platform Administrator** Entra role (tenant-wide), OR
+- **System Administrator** Dataverse role (environment-scope)
+
+Currently has only: **Global Reader** (read-only).
+
+**Unblock remains:** Obtain breakglass account credentials; grant Power Platform Administrator role via Entra ID.
 
 ---
 

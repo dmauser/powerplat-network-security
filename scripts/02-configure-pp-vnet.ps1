@@ -93,7 +93,69 @@ function Install-EnterprisePoliciesModule {
         Install-Module -Name 'Microsoft.PowerPlatform.EnterprisePolicies' -RequiredVersion $RequiredVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
     }
 
+    # Microsoft.PowerPlatform.EnterprisePolicies v0.17.0 references several globals
+    # during module init without guarding against them being unset. Pre-set them to avoid
+    # Set-StrictMode -Version Latest failures on import (module bug, not ours).
+    foreach ($boolVar in @('InPesterExecution', 'PrereqsChecked')) {
+        if (-not (Test-Path "variable:Global:$boolVar")) {
+            Set-Variable -Name $boolVar -Value $false -Scope Global
+        }
+    }
+    if (-not (Test-Path 'variable:Global:ImportedTypes')) {
+        $Global:ImportedTypes = [string[]]@()
+    }
+
     Import-Module -Name 'Microsoft.PowerPlatform.EnterprisePolicies' -RequiredVersion $RequiredVersion -Force -ErrorAction Stop
+}
+
+function Ensure-AzContext {
+    <#
+    .SYNOPSIS
+    Bridges the current Azure CLI session into the Az PowerShell module context.
+
+    .DESCRIPTION
+    Microsoft.PowerPlatform.EnterprisePolicies v0.17.0 calls Get-AzContext internally
+    before each operation. If no Az PowerShell context exists (i.e., Connect-AzAccount has
+    never been called), the module falls through to an interactive browser prompt even when
+    the operator is already signed in via az CLI. This function detects that condition and
+    populates an Az context using the existing az CLI access token, making the EP module
+    commands non-interactive when az CLI is already authenticated.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TenantId
+    )
+
+    $contexts = Get-AzContext -ListAvailable -ErrorAction SilentlyContinue
+    $matched = $contexts | Where-Object {
+        $_.Tenant.Id -eq $TenantId -or $_.Account.Tenants -contains $TenantId
+    } | Select-Object -First 1
+
+    if ($matched) {
+        Write-Host "Az PowerShell context already present for tenant $TenantId — skipping bridge."
+        return
+    }
+
+    Write-Host "Bridging Azure CLI session into Az PowerShell module (no interactive login required)..."
+    Assert-CommandAvailable -Name 'az'
+
+    $tokenJson = az account get-access-token --output json 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tokenJson)) {
+        throw 'Unable to obtain access token from Azure CLI. Ensure az login is complete before re-running.'
+    }
+    $tokenObj = $tokenJson | ConvertFrom-Json
+    $accessToken  = $tokenObj.accessToken
+    $subscriptionId = az account show --query id -o tsv 2>$null
+    $accountId      = az account show --query user.name -o tsv 2>$null
+    if ([string]::IsNullOrWhiteSpace($accountId)) {
+        # Service principals surface as user.name = null; fall back to user object
+        $accountId = az account show --query user.name -o tsv 2>$null
+        if ([string]::IsNullOrWhiteSpace($accountId)) { $accountId = 'token@azurecli' }
+    }
+
+    $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId `
+        -Tenant $TenantId -Subscription $subscriptionId -ErrorAction Stop
+    Write-Host "Az PowerShell module connected as $accountId (tenant $TenantId)." -ForegroundColor Green
 }
 
 function Get-ResolvedDeployOutputsPath {
@@ -256,8 +318,9 @@ try {
     $appInsightsInstrumentationKey = [string]$deployOutputs.appInsightsInstrumentationKey.value
 
     Install-EnterprisePoliciesModule -RequiredVersion $EnterprisePoliciesModuleVersion
+    Ensure-AzContext -TenantId $TenantId
 
-    $regionCommand = Get-Command -Name 'Get-EnvironmentRegion' -ErrorAction Stop
+    $regionCommand= Get-Command -Name 'Get-EnvironmentRegion' -ErrorAction Stop
     $null = Get-Command -Name 'Get-SubnetInjectionEnterprisePolicy' -ErrorAction Stop
     $enableCommand = Get-Command -Name 'Enable-SubnetInjection' -ErrorAction Stop
 
