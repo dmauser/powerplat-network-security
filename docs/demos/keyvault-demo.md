@@ -120,21 +120,25 @@ This response is the **proof point**: `publicNetworkAccess=Disabled` + `networkA
 
 ### Step 3 — Add the Key Vault connector
 
+> **Do this before typing any formula.** `AzureKeyVault` is only a valid namespace in the formula bar if the connection exists in this app. If you skip this step, every `AzureKeyVault.*` call shows a red underline.
+
 **Data** (left panel) → **+ Add data** → search `Key Vault` → select **Azure Key Vault**.
 
 Connection setup:
 - **Sign in** with `admin@MngEnvMCAP423074.onmicrosoft.com`
+- **Key vault name**: `kv-pbinet-dev-k6ozyjreme` ← the vault is bound here, NOT in the formula
 - Connection display name: `kv-demo`
-- Vault name: `kv-pbinet-dev-k6ozyjreme`
 
-Click **Connect**.
+Click **Connect**. Confirm `kv-demo` appears under **Data** in the left panel before continuing.
 
 ### Step 4 — Wire up the UI
+
+> **Formula note:** `GetSecret` takes **one** argument — the secret name only. The vault name is part of the connection (set in Step 3). Passing the vault name as a first argument causes a red underline because no such overload exists.
 
 1. Insert a **Button**. Set `OnSelect`:
 
 ```text
-Set(secretValue, AzureKeyVault.GetSecret("kv-pbinet-dev-k6ozyjreme", "demo-secret").value)
+Set(secretValue, AzureKeyVault.GetSecret("demo-secret").value)
 ```
 
 2. Insert a **Label**. Set `Text`:
@@ -190,6 +194,8 @@ Expected: `CallerIPAddress_s` is a private IP (starting `10.10.` for the East de
 
 | Symptom | Fix |
 |---|---|
+| `AzureKeyVault.*` shows red underline in formula bar | Connection not added to this app. Go to **Data → + Add data → Azure Key Vault** and complete the connection setup (Step 3) before typing any formula. |
+| Red underline specifically on `GetSecret("vault-name", "secret-name")` | Wrong signature. `GetSecret` takes **one** argument (secret name only). Vault is bound in the connection. Fix: `AzureKeyVault.GetSecret("demo-secret").value` |
 | Connector creation fails: "no network path" | ME may not have refreshed subnet injection — wait 5–10 min, retry. Recheck `docs/managed-environment-setup.md`. |
 | `GetSecret` returns 403 in the app | Run the RBAC grant in Pre-flight §c. Allow 2–5 min for role propagation. |
 | `AzureKeyVault.GetSecret` returns null | Secret name is case-sensitive. Confirm it is exactly `demo-secret`. Confirm the connection is signed in as `admin@MngEnvMCAP423074.onmicrosoft.com`. |
