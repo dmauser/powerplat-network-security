@@ -67,6 +67,58 @@ Full gap table and prioritized punch list written to `.squad/decisions/inbox/neo
 
 **P6 — Close PE Diagnostic Gap (Niobe):** Update decisions.md monitoring table to reflect that PE diagnostic settings are NOT supported by Azure (platform limitation); PE metrics are monitored via Azure Monitor Metrics blade instead.
 
+## Learnings — 2026-05-21T04:33:00Z — Phase 2 validation (post-ME-link)
+
+**Trigger:** Tank completed ME link (commit `052a718`). Daniel requested Phase 2 validation sweep.
+
+### What I did
+- Confirmed subscription context and read deploy outputs (`.azure/last-deploy-outputs.json`).
+- Attempted `scripts/03-validate-network.sh` via Git Bash — failed with bash syntax error (see gotcha #1).
+- Ran all script checks manually via az CLI in PowerShell.
+- Verified enterprise policy properties via ARM API (`2020-10-30-preview`).
+- Verified both subnet delegations, all three DNS zones + VNet links, PE NIC IPs vs DNS A records, diagnostic settings, KV/Storage public denial.
+
+### Key findings
+1. **ME link confirmed via ARM.** EP `ep-pbinet-dev` ARM properties show `networkInjection.virtualNetworks` listing both `vnet-pbinet-dev-east` and `vnet-pbinet-dev-west` with `snet-pp-delegated`. The ARM `healthStatus=Undetermined` is expected (per decisions.md, BAP lifecycle op is authoritative).
+2. **All Azure-side plumbing is clean.** KV PE NIC 10.10.1.4 = DNS A 10.10.1.4 ✅; Storage PE NIC 10.10.1.5 = DNS A 10.10.1.5 ✅. Both subnet delegations confirmed. All 3 DNS zones linked to both VNets. All 4 diagnostic settings confirmed (KV, blob, VNet-east, VNet-west → LAW).
+3. **SQL is correctly absent.** `deploySqlSkipped=true`, empty `sqlServerFqdn`, no SQL PE, SQL DNS zone is empty. Deferred per Option B.
+4. **App Insights is workspace-based.** `ingestionMode=LogAnalytics`, linked to `law-pbinet-dev-k6ozyjremes6m`. PPAC binding to ME is the only remaining manual step.
+
+### New gotchas (script bugs found)
+
+**Gotcha 1 — CRLF+LF mixed line endings in `03-validate-network.sh`.**
+`file` confirms: `Unicode text, UTF-8 text executable, with CRLF, LF line terminators`. This causes a bash syntax error on some Git Bash installs (Windows). Fix: run `sed -i 's/\r//' scripts/03-validate-network.sh` before executing, or configure `.gitattributes` to enforce LF.
+
+**Gotcha 2 — `{ 'True' }` / `{ 'False' }` inside `$(...)` in `probe_sql_public_denial()`.**
+Bash line 116: the PowerShell `-Command` argument contains `if (\$result.TcpTestSucceeded) { 'True' } else { 'False' }`. Inside a `$(...)` command substitution, the `{` after a `)` token is parsed as a brace group by bash, causing a syntax error. This is a known bash parsing trap. Fix: use a heredoc, single-quoted argument via `$'...'`, or `printf '%s'` to pass the PowerShell command without bash interpreting `{`.
+
+**Gotcha 3 — KV public denial probe asserts HTTP 403, but unauthenticated requests return 401.**
+The validation script uses `curl` (no Bearer token) against `https://<kv>.vault.azure.net/secrets/...` and asserts HTTP 403. ACTUAL behavior: Azure KV processes auth before firewall check on unauthenticated requests. Unauthenticated public request → 401 (`AKV10000: missing Bearer token`) with `x-ms-keyvault-network-info` showing the public IP. Authenticated request → 403 `ForbiddenByConnection`. The correct deny-path proof for KV is an authenticated check (`az keyvault secret list`), not a bare curl. Fix: change the script's KV denial probe to `az keyvault secret list` and assert `ForbiddenByConnection` in error output, OR change expected HTTP status to 401 (but that is weaker evidence).
+
+### Validation evidence summary (Phase 2)
+
+| Check | Evidence | Result |
+|---|---|---|
+| KV public denial | `az keyvault secret list` → `ForbiddenByConnection` | ✅ PASS |
+| Storage public denial | `curl` anonymous GET → HTTP 403 | ✅ PASS |
+| KV PE NIC IP | `az network nic show` → `10.10.1.4` | ✅ PASS |
+| KV DNS A record | `az network private-dns record-set a show` → `10.10.1.4` | ✅ PASS (match) |
+| Storage PE NIC IP | `az network nic show` → `10.10.1.5` | ✅ PASS |
+| Storage DNS A record | `az network private-dns record-set a show` → `10.10.1.5` | ✅ PASS (match) |
+| East snet-pp-delegated | `delegations[0].serviceName = Microsoft.PowerPlatform/enterprisePolicies` | ✅ PASS |
+| West snet-pp-delegated | `delegations[0].serviceName = Microsoft.PowerPlatform/enterprisePolicies` | ✅ PASS |
+| EP networkInjection | Both VNets + snet-pp-delegated listed | ✅ PASS |
+| EP healthStatus | Undetermined | ⚠️ EXPECTED (BAP authoritative) |
+| DNS zones → VNet links | All 3 zones: link-east + link-west | ✅ PASS |
+| KV diag settings | `diag-kv` → LAW | ✅ PASS |
+| Storage blob diag | `diag-blob` → LAW | ✅ PASS |
+| VNet East diag | `diag-vnet-east` → LAW | ✅ PASS |
+| VNet West diag | `diag-vnet-west` → LAW | ✅ PASS |
+| App Insights → LAW | `ingestionMode=LogAnalytics` | ✅ PASS |
+| SQL (all) | `deploySqlSkipped=true` | Deferred — Option B |
+| AI → ME binding | PPAC manual step | Deferred — manual |
+| Script execution | CRLF+LF + `{` syntax error | ⚠️ SCRIPT BUG |
+
 ## Team Update — 2026-05-20T19:17:03Z
 
 **Follow-up sweep completed.** Trinity resolved westus3 + AzureServices flags by changing `defaultLocation` to eastus and setting `bypass = 'None'` on Key Vault/Storage modules (see `.squad/orchestration-log/2026-05-20T19-17-03Z-trinity.md`). Niobe merged connector test steps, removed archive references, and cleaned diagram (see `.squad/orchestration-log/2026-05-20T19-17-03Z-niobe.md`). All 5 outstanding items now resolved; decisions merged into `.squad/decisions.md`. See `.squad/log/2026-05-20T19-17-03Z-followup-sweep.md` for round summary.

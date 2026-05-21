@@ -111,11 +111,14 @@ lookup_private_dns_ip() {
 probe_sql_public_denial() {
   local sql_fqdn="$1"
   local test_result=''
+  # Pre-assign PS command to a variable: { } inside a double-quoted assignment is safe;
+  # the brace-parse issue only occurs inside $(...) command substitutions.
+  local ps_cmd="\$ProgressPreference='SilentlyContinue'; \$r = Test-NetConnection -ComputerName '${sql_fqdn}' -Port 1433 -WarningAction SilentlyContinue; if (\$r.TcpTestSucceeded) { 'True' } else { 'False' }"
 
   if command -v pwsh >/dev/null 2>&1; then
-    test_result="$(pwsh -NoLogo -NoProfile -Command \"\$ProgressPreference='SilentlyContinue'; \$result = Test-NetConnection -ComputerName '${sql_fqdn}' -Port 1433 -WarningAction SilentlyContinue; if (\$result.TcpTestSucceeded) { 'True' } else { 'False' }\" | tr -d '\r')"
+    test_result="$(pwsh -NoLogo -NoProfile -Command "$ps_cmd" | tr -d '\r')"
   elif command -v powershell.exe >/dev/null 2>&1; then
-    test_result="$(powershell.exe -NoLogo -NoProfile -Command \"\$ProgressPreference='SilentlyContinue'; \$result = Test-NetConnection -ComputerName '${sql_fqdn}' -Port 1433 -WarningAction SilentlyContinue; if (\$result.TcpTestSucceeded) { 'True' } else { 'False' }\" | tr -d '\r')"
+    test_result="$(powershell.exe -NoLogo -NoProfile -Command "$ps_cmd" | tr -d '\r')"
   elif command -v timeout >/dev/null 2>&1; then
     if timeout 5 bash -c "</dev/tcp/${sql_fqdn}/1433" >/dev/null 2>&1; then
       test_result='True'
@@ -179,7 +182,7 @@ assert_private_dns_matches_endpoint() {
 main() {
   local kv_name storage_name sql_fqdn sql_server_name sql_database_name
   local kv_id sql_id storage_id resource_group
-  local kv_code storage_anon_code storage_sas_code
+  local storage_anon_code storage_sas_code
   local kv_pna sql_pna storage_pna storage_public_blob storage_sas account_key sas_expiry sas_token
   local kv_pe_ip sql_pe_ip storage_pe_ip
   local exit_code=0
@@ -213,12 +216,20 @@ main() {
   assert_non_empty 'Resource group' "$resource_group" || exit_code=1
 
   echo 'Public-side negative-path checks (expected to fail)...'
-  kv_code="$(curl -sS -o /dev/null -w '%{http_code}\n' "https://${kv_name}.vault.azure.net/secrets/demo-secret?api-version=7.4" 2>/dev/null || true)"
+  # Azure KV returns HTTP 401 (not 403) for unauthenticated requests even when publicNetworkAccess=Disabled
+  # because the auth layer runs before the network ACL check on unauthenticated callers.
+  # The correct deny-path proof requires an authenticated request, which then yields ForbiddenByConnection (403).
+  local kv_deny_output
+  kv_deny_output="$(az keyvault secret list --vault-name "$kv_name" 2>&1 || true)"
+  if echo "$kv_deny_output" | grep -q 'ForbiddenByConnection'; then
+    ok 'Key Vault public endpoint: ForbiddenByConnection (authenticated deny as expected)'
+  else
+    fail "Key Vault public endpoint did not return ForbiddenByConnection; got: ${kv_deny_output}"
+    exit_code=1
+  fi
+  probe_sql_public_denial "$sql_fqdn" || exit_code=1
   storage_public_blob="https://${storage_name}.blob.core.windows.net/${TEST_CONTAINER}/${TEST_BLOB}"
   storage_anon_code="$(curl -sS -o /dev/null -w '%{http_code}\n' "$storage_public_blob" 2>/dev/null || true)"
-
-  assert_http_status 'Key Vault public REST endpoint' "$kv_code" '403' || exit_code=1
-  probe_sql_public_denial "$sql_fqdn" || exit_code=1
   assert_http_status 'Storage public anonymous blob GET' "$storage_anon_code" '403' || exit_code=1
 
   account_key="$(az storage account keys list -g "$resource_group" -n "$storage_name" --query '[0].value' -o tsv 2>/dev/null | tr -d '\r' || true)"
