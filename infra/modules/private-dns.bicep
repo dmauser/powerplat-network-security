@@ -105,3 +105,74 @@ resource blobZoneWestLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks
 output kvZoneId string = keyVaultZone.id
 output sqlZoneId string = sqlZone.id
 output blobZoneId string = blobZone.id
+
+// ---------------------------------------------------------------------------
+// privatelink.azurewebsites.net — Function App inbound private endpoint
+// ---------------------------------------------------------------------------
+resource websitesZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  #disable-next-line no-hardcoded-env-urls
+  name: 'privatelink.azurewebsites.net'
+  location: 'global'
+  tags: tags
+}
+
+resource websitesZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  name: eastLinkName
+  parent: websitesZone
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnetEastId
+    }
+  }
+}
+
+resource websitesZoneWestLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  name: westLinkName
+  parent: websitesZone
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnetWestId
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// privatelink.file.core.windows.net — Function App runtime storage file PE
+// ---------------------------------------------------------------------------
+resource fileZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  #disable-next-line no-hardcoded-env-urls
+  name: 'privatelink.file.core.windows.net'
+  location: 'global'
+  tags: tags
+}
+
+resource fileZoneEastLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  name: eastLinkName
+  parent: fileZone
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnetEastId
+    }
+  }
+}
+
+resource fileZoneWestLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  name: westLinkName
+  parent: fileZone
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnetWestId
+    }
+  }
+}
+
+output websitesZoneId string = websitesZone.id
+output fileZoneId string = fileZone.id

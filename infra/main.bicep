@@ -30,6 +30,9 @@ param deploySql bool = true
 @description('Deploy the storage account resources.')
 param deployStorage bool = true
 
+@description('Deploy the Function App resources for Part 4 demo (VNet-integrated EP1 with App Insights dependency tracking against private Key Vault).')
+param deployFunctionApp bool = true
+
 @description('Log Analytics workspace data retention in days (30-730).')
 @minValue(30)
 @maxValue(730)
@@ -331,6 +334,72 @@ module alerts 'modules/alerts.bicep' = {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Part 4 — Function App (VNet-integrated, App Insights dependency tracking)
+// ---------------------------------------------------------------------------
+
+module funcApp 'modules/funcapp.bicep' = if (deployFunctionApp) {
+  name: 'funcapp-${prefix}-${env}'
+  scope: rg
+  params: {
+    prefix: prefix
+    env: env
+    location: defaultLocation
+    tags: tags
+    funcSubnetId: network.outputs.subnetEastFuncAppId
+    appInsightsName: appInsights.outputs.appInsightsName
+    keyVaultName: keyVault.outputs.keyVaultName
+    logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+  }
+}
+
+// Inbound private endpoint for the Function App (sites sub-resource).
+module funcAppPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-func-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-func-${prefix}-${env}'
+    location: regionA
+    tags: tags
+    subnetId: network.outputs.subnetEastPepId
+    targetResourceId: funcApp!.outputs.functionAppResourceId
+    groupId: 'sites'
+    privateDnsZoneId: privateDns.outputs.websitesZoneId
+  }
+}
+
+// Private endpoint for the Function App runtime storage — blob sub-resource.
+// Reuses the existing privatelink.blob.core.windows.net zone.
+module funcStorageBlobPrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-funcstg-blob-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-funcstg-blob-${prefix}-${env}'
+    location: regionA
+    tags: tags
+    subnetId: network.outputs.subnetEastPepId
+    targetResourceId: funcApp!.outputs.funcStorageAccountId
+    groupId: 'blob'
+    privateDnsZoneId: privateDns.outputs.blobZoneId
+  }
+}
+
+// Private endpoint for the Function App runtime storage — file sub-resource.
+// Uses the new privatelink.file.core.windows.net zone added to private-dns.bicep.
+module funcStorageFilePrivateEndpoint 'modules/private-endpoint.bicep' = if (deployFunctionApp) {
+  name: 'pe-funcstg-file-${prefix}-${env}'
+  scope: rg
+  params: {
+    name: 'pep-funcstg-file-${prefix}-${env}'
+    location: regionA
+    tags: tags
+    subnetId: network.outputs.subnetEastPepId
+    targetResourceId: funcApp!.outputs.funcStorageAccountId
+    groupId: 'file'
+    privateDnsZoneId: privateDns.outputs.fileZoneId
+  }
+}
+
 output enterprisePolicyArmId string = enterprisePolicy.outputs.enterprisePolicyArmId
 output keyVaultName string = keyVault.outputs.keyVaultName
 output keyVaultUri string = keyVault.outputs.keyVaultUri
@@ -350,3 +419,8 @@ output logAnalyticsWorkspaceId string = logAnalytics.outputs.workspaceId
 // App Insights outputs — consumed by scripts/02-configure-pp-vnet.ps1 for PP Managed Environment binding.
 output appInsightsName string = appInsights.outputs.appInsightsName
 output appInsightsConnectionString string = appInsights.outputs.appInsightsConnectionString
+
+// Part 4 Function App outputs
+output functionAppName string = deployFunctionApp ? funcApp!.outputs.functionAppName : ''
+output functionAppHostname string = deployFunctionApp ? funcApp!.outputs.functionAppHostname : ''
+output funcSubnetId string = network.outputs.subnetEastFuncAppId

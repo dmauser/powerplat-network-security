@@ -26,6 +26,9 @@
     "deployStorage": {
       "value": true
     },
+    "deployFunctionApp": {
+      "value": true
+    },
     "logAnalyticsRetentionDays": {
       "value": 30
     },
