@@ -35,6 +35,7 @@ main() {
   local deployment_name
   local deploy_json outputs_file
   local enterprise_policy_arm_id key_vault_name key_vault_uri sql_server_fqdn sql_database_name storage_account_name uami_resource_id uami_principal_id
+  local nsp_name nsp_id flow_logs_storage_name log_analytics_workspace_name
   local -a demo_user_oids=()
   local auto_demo_user=true
   local signed_in_oid demo_user_json
@@ -147,6 +148,10 @@ main() {
   storage_account_name="$(jq -r '.storageAccountName.value' "$outputs_file")"
   uami_resource_id="$(jq -r '.userAssignedIdentityResourceId.value' "$outputs_file")"
   uami_principal_id="$(jq -r '.userAssignedIdentityPrincipalId.value' "$outputs_file")"
+  nsp_name="$(jq -r '.nspName.value // ""' "$outputs_file")"
+  nsp_id="$(jq -r '.nspId.value // ""' "$outputs_file")"
+  flow_logs_storage_name="$(jq -r '.flowLogsStorageName.value // ""' "$outputs_file")"
+  log_analytics_workspace_name="$(jq -r '.logAnalyticsWorkspaceName.value // ""' "$outputs_file")"
 
   ok "Deployment completed"
   echo
@@ -158,11 +163,17 @@ main() {
   echo "SQL Server FQDN          : ${sql_server_fqdn}"
   echo "SQL Database             : ${sql_database_name}"
   echo "Storage account          : ${storage_account_name}"
+  echo "Flow logs storage        : ${flow_logs_storage_name:-not returned by template}"
+  echo "NSP name                 : ${nsp_name:-not returned by template}"
+  echo "NSP ID                   : ${nsp_id:-not returned by template}"
+  echo "LAW workspace            : ${log_analytics_workspace_name:-not returned by template}"
   echo "UAMI resource ID         : ${uami_resource_id}"
   echo "UAMI principal ID        : ${uami_principal_id}"
   echo
+  echo "✅ NSP deployed in Learning mode. Check NSPAccessLogs in LAW ${log_analytics_workspace_name:-<workspaceName>}."
   echo "Saved outputs to ${outputs_file}"
   echo "Next: Run ./scripts/02-configure-pp-vnet.ps1"
+  echo "Note: Traffic Analytics auto-provisions the NetworkMonitoring solution after the first processed flow-log batch; no manual AzureNetworkAnalytics install step is required."
   echo "Note: remember to chmod +x scripts/*.sh (and later git update-index --chmod=+x for tracked shell scripts)."
 }
 

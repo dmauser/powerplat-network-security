@@ -11,9 +11,11 @@ RED='\033[1;31m'
 RESET='\033[0m'
 MIN_AZ_VERSION='2.60.0'
 MIN_PWSH_VERSION='7.0.0'
-FEATURE_NAMESPACE='Microsoft.PowerPlatform'
-FEATURE_RESOURCE_TYPE='Microsoft.PowerPlatform/accounts/enterprisePolicies'
-FEATURE_NAME='enterprisePoliciesPreview'
+PP_FEATURE_NAMESPACE='Microsoft.PowerPlatform'
+PP_FEATURE_RESOURCE_TYPE='Microsoft.PowerPlatform/accounts/enterprisePolicies'
+PP_FEATURE_NAME='enterprisePoliciesPreview'
+NSP_FEATURE_NAMESPACE='Microsoft.Network'
+NSP_FEATURE_NAME='AllowNSPInPublicPreview'
 WAIT_TIMEOUT_SECONDS=900
 
 ok() {
@@ -115,15 +117,58 @@ wait_for_feature() {
   exit 1
 }
 
+register_provider_if_needed() {
+  local namespace="$1"
+  local state=""
+
+  state="$(az provider show --namespace "$namespace" --query registrationState -o tsv 2>/dev/null || true)"
+  if [[ "$state" == "Registered" ]]; then
+    ok "Resource provider already registered: ${namespace}"
+    return 1
+  fi
+
+  echo "Registering resource provider ${namespace} (current state: ${state:-unknown})..."
+  az provider register --namespace "$namespace" >/dev/null
+  wait_for_provider "$namespace"
+  return 0
+}
+
+register_feature_if_needed() {
+  local namespace="$1"
+  local feature_name="$2"
+  local state=""
+
+  state="$(az feature show --namespace "$namespace" --name "$feature_name" --query properties.state -o tsv 2>/dev/null || true)"
+  case "$state" in
+    Registered)
+      ok "Subscription feature already registered: ${namespace}/${feature_name}"
+      return 1
+      ;;
+    Registering|Pending)
+      echo "Feature ${namespace}/${feature_name} is already in progress (current state: ${state}). Waiting for completion..."
+      wait_for_feature "$namespace" "$feature_name"
+      return 0
+      ;;
+    *)
+      echo "Registering subscription feature ${namespace}/${feature_name} (current state: ${state:-unknown})..."
+      az feature register --namespace "$namespace" --name "$feature_name" >/dev/null
+      wait_for_feature "$namespace" "$feature_name"
+      return 0
+      ;;
+  esac
+}
+
 main() {
   local account_json subscription_name subscription_id tenant_id
   local az_version bicep_version pwsh_version jq_version bash_version
+  local nsp_feature_changed=false
   local providers=(
     'Microsoft.PowerPlatform'
     'Microsoft.Sql'
     'Microsoft.KeyVault'
     'Microsoft.Storage'
     'Microsoft.Network'
+    'Microsoft.Insights'
   )
 
   require_command az
@@ -159,23 +204,30 @@ main() {
   echo "Tenant:       ${tenant_id}"
 
   for provider in "${providers[@]}"; do
-    echo "Ensuring resource provider ${provider} is registered..."
-    az provider register --namespace "$provider" --wait >/dev/null
-    wait_for_provider "$provider"
+    register_provider_if_needed "$provider" || true
   done
 
-  echo "Ensuring preview feature ${FEATURE_NAME} is registered for ${FEATURE_RESOURCE_TYPE}..."
-  az feature register --namespace "$FEATURE_NAMESPACE" --name "$FEATURE_NAME" >/dev/null
-  wait_for_feature "$FEATURE_NAMESPACE" "$FEATURE_NAME"
+  echo "Ensuring preview feature ${PP_FEATURE_NAME} is registered for ${PP_FEATURE_RESOURCE_TYPE}..."
+  register_feature_if_needed "$PP_FEATURE_NAMESPACE" "$PP_FEATURE_NAME" || true
 
-  echo "Refreshing ${FEATURE_NAMESPACE} provider registration after feature enablement..."
-  az provider register --namespace "$FEATURE_NAMESPACE" --wait >/dev/null
-  wait_for_provider "$FEATURE_NAMESPACE"
+  echo "Ensuring NSP preview feature ${NSP_FEATURE_NAMESPACE}/${NSP_FEATURE_NAME} is registered..."
+  if register_feature_if_needed "$NSP_FEATURE_NAMESPACE" "$NSP_FEATURE_NAME"; then
+    nsp_feature_changed=true
+  fi
+
+  if [[ "$nsp_feature_changed" == true ]]; then
+    echo "Refreshing ${NSP_FEATURE_NAMESPACE} provider registration after feature enablement..."
+    az provider register --namespace "$NSP_FEATURE_NAMESPACE" >/dev/null
+    wait_for_provider "$NSP_FEATURE_NAMESPACE"
+  else
+    ok "No ${NSP_FEATURE_NAME} refresh needed; ${NSP_FEATURE_NAMESPACE} feature already active."
+  fi
 
   ok 'Prerequisites completed successfully'
   echo
-  echo "Summary: validated az ${MIN_AZ_VERSION}+, pwsh ${MIN_PWSH_VERSION}+, bicep, jq, and bash; registered the required resource providers; enabled ${FEATURE_NAME} for ${FEATURE_RESOURCE_TYPE}."
+  echo "Summary: validated az ${MIN_AZ_VERSION}+, pwsh ${MIN_PWSH_VERSION}+, bicep, jq, and bash; verified provider registrations for Microsoft.PowerPlatform, Microsoft.Sql, Microsoft.KeyVault, Microsoft.Storage, Microsoft.Network, and Microsoft.Insights; enabled ${PP_FEATURE_NAME} for ${PP_FEATURE_RESOURCE_TYPE}; ensured ${NSP_FEATURE_NAMESPACE}/${NSP_FEATURE_NAME} is active for NSP preview deployments."
   echo 'Next: run ./scripts/01-deploy.sh'
+  warn 'Microsoft.NetworkAnalytics is not required; Traffic Analytics auto-provisions its NetworkMonitoring solution and AzureNetworkAnalytics_CL data path after the first processed flow-log batch.'
   warn 'If a shell script still fails in your environment, verify it is checked out with LF line endings and executable permissions.'
 }
 

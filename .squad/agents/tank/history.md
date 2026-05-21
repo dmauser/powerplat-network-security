@@ -35,6 +35,11 @@
 - **KQL evidence:** `AzureDiagnostics | where OperationName == "SecretGet" | project CallerIPAddress_s` is the strongest technical proof — it shows a `10.10.x.x` private IP, not a public internet address. The App Insights `dependencies` table is a secondary signal if App Insights binding is in place.
 - **Deliverable:** `docs/demos/keyvault-demo.md` (8.6 KB). Decision filed at `.squad/decisions/inbox/tank-kv-demo-guide-2026-05-21.md`.
 
+## Learnings — 2026-05-21 (NSP prereqs + Traffic Analytics)
+
+- **NSP preview gate:** `Microsoft.Network/AllowNSPInPublicPreview` is still required before deploying `Microsoft.Network/networkSecurityPerimeters` preview resources. After the feature reaches `Registered`, re-register `Microsoft.Network` once so the subscription picks up the preview capability.
+- **Traffic Analytics install pattern:** `Microsoft.Insights` must be registered for NSP diagnostic settings and Traffic Analytics plumbing, but `Microsoft.NetworkAnalytics` is **not** required. Enabling Traffic Analytics on the flow log auto-provisions the `NetworkMonitoring` solution and starts populating `AzureNetworkAnalytics_CL` after the first processed batch (typically ~10 minutes later).
+
 ## Punch List — Queued for Tank (2026-05-20T21:06:15-05:00)
 
 **P2 — Link ME to Policy (BLOCKED on role grant):** After operator grants Power Platform Administrator role to admin@... (see Phase 2 Prep section in decisions.md for step-by-step), resume ME policy link:
