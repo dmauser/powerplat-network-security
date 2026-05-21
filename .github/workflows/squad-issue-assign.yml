@@ -1,8 +1,9 @@
 name: Squad Issue Assign
 
+# ⏸ Auto-triggers paused 2026-05-21 to conserve GitHub Actions credits.
+# Re-enable by restoring the original `on:` block (see git history).
 on:
-  issues:
-    types: [labeled]
+  workflow_dispatch:
 
 permissions:
   issues: write

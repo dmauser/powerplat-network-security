@@ -1,16 +1,8 @@
 name: Bicep validate
 
+# ⏸ Auto-triggers paused 2026-05-21 to conserve GitHub Actions credits.
+# Re-enable by restoring the original `on:` block (see git history).
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'infra/**'
-      - '.github/workflows/bicep-validate.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'infra/**'
-      - '.github/workflows/bicep-validate.yml'
   workflow_dispatch:
 
 permissions:

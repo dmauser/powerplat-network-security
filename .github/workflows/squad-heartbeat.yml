@@ -6,14 +6,9 @@ name: Squad Heartbeat (Ralph)
 #   - .github/workflows/squad-heartbeat.yml (active workflow)
 # Run 'squad upgrade' to sync installed copies from source templates.
 
+# ⏸ Auto-triggers paused 2026-05-21 to conserve GitHub Actions credits.
+# Re-enable by restoring the original `on:` block (see git history).
 on:
-  # React to completed work or new squad work
-  issues:
-    types: [closed, labeled]
-  pull_request:
-    types: [closed]
-
-  # Manual trigger
   workflow_dispatch:
 
 permissions:

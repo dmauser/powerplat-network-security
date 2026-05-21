@@ -1,10 +1,8 @@
 name: Sync Squad Labels
 
+# ⏸ Auto-triggers paused 2026-05-21 to conserve GitHub Actions credits.
+# Re-enable by restoring the original `on:` block (see git history).
 on:
-  push:
-    paths:
-      - '.squad/team.md'
-      - '.ai-team/team.md'
   workflow_dispatch:
 
 permissions:
