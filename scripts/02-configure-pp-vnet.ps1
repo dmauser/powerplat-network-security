@@ -428,10 +428,11 @@ try {
     #
     # Configure App Insights binding manually via the PPAC admin center:
     #   admin.powerplatform.microsoft.com
-    #   → Environments → <your environment> → Settings → Product → Features
-    #   → Application Insights
+    #   → Manage (left nav) → Data export → App Insights tab → New data export
+    #   Select your Azure subscription, resource group, and App Insights resource.
+    #   (Managed Environments only; requires PP admin + Dataverse System Administrator role)
     #
-    # Reference: https://learn.microsoft.com/en-us/power-platform/admin/app-insights-overview
+    # Reference: https://learn.microsoft.com/en-us/power-platform/admin/set-up-export-application-insights
     # ---------------------------------------------------------------------------
 
     if (-not [string]::IsNullOrWhiteSpace($appInsightsResourceId)) {
@@ -441,7 +442,8 @@ try {
         Write-Host '  schema does not expose applicationInsightsId in any current API version.' -ForegroundColor Yellow
         Write-Host ''
         Write-Host '  Configure via PPAC admin center:' -ForegroundColor Yellow
-        Write-Host '    admin.powerplatform.microsoft.com → Environments → Settings → Product → Features → Application Insights' -ForegroundColor Yellow
+        Write-Host '    admin.powerplatform.microsoft.com → Manage → Data export → App Insights tab → New data export' -ForegroundColor Yellow
+        Write-Host '    Select Azure subscription, resource group, and App Insights resource from the pickers.' -ForegroundColor Yellow
         Write-Host ''
         Write-Host "  Target App Insights resource: $appInsightsResourceId" -ForegroundColor Yellow
     }

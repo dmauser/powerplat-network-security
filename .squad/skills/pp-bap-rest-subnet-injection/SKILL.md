@@ -153,6 +153,7 @@ op shows `Succeeded`.
 | **Idempotency — re-link = swap** | If the same EP is already linked, re-submitting the link POST returns 202 and completes as `SwapNetworkInjection: Succeeded` (NOT a 400 error). This makes the call fully idempotent. |
 | **GET endpoint returns 404** | `GET .../enterprisePolicies/NetworkInjection?api-version=2019-10-01` always returns 404. Use the lifecycle op result (`type.id` + `state.id`) to confirm link state. |
 | **healthStatus timing** | ARM `healthStatus` may remain `Undetermined` indefinitely after a successful link. It is NOT a reliable success indicator. Use the lifecycle op state. |
+| **App Insights binding — no REST path** | `applicationInsightsId` and related fields do NOT exist in `EnvironmentProperties` on any BAP API version (2016-11-01 → 2024-05-01). All PATCH attempts return `400 InvalidRequestContent`. No public REST or PowerShell cmdlet exists. Configure via PPAC: **Manage (left nav) → Data export → App Insights tab → New data export** (resource picker — no connection string paste needed). Reference: [learn.microsoft.com/power-platform/admin/set-up-export-application-insights](https://learn.microsoft.com/en-us/power-platform/admin/set-up-export-application-insights). |
 
 ---
 

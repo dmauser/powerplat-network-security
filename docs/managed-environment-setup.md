@@ -9,6 +9,7 @@ This walkthrough explains how to prepare the Power Platform side of the lab befo
 - [Create or select a United States environment](#create-or-select-a-united-states-environment)
 - [Promote the environment to Managed Environment](#promote-the-environment-to-managed-environment)
 - [Upgrade the governance tier to Standard](#upgrade-the-governance-tier-to-standard)
+- [Bind Application Insights for telemetry](#bind-application-insights-for-telemetry)
 - [Find the environment ID](#find-the-environment-id)
 - [Validate the region with PowerShell](#validate-the-region-with-powershell)
 - [Next step](#next-step)
@@ -70,6 +71,30 @@ to complete. You can verify the result in the [Power Platform admin center](http
 under **Environments → Settings → Managed Environment**.
 
 > **Note:** Attempting to upgrade the tier by PATCHing `scopes/admin/environments` directly returns 204 but makes no change. The dedicated governance configuration endpoint, called by `Set-AdminPowerAppEnvironmentGovernanceConfiguration`, is required. This is not documented in the standard VNet support setup guide ([learn.microsoft.com/power-platform/admin/vnet-support-setup-configure](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-setup-configure)) but is a confirmed prerequisite for environments starting at the Basic tier.
+
+## Bind Application Insights for telemetry
+
+After the ME is linked to the enterprise policy you can export Power Platform telemetry (Dataverse diagnostics, Power Automate flows, canvas app events) to Azure Application Insights. There is no public REST API for this step; it must be performed in the PPAC admin center.
+
+> **Requirements:** Power Platform administrator role in the tenant **and** Dataverse System Administrator role on the environment. Managed Environments only.
+
+1. Go to [Power Platform admin center](https://admin.powerplatform.microsoft.com/).
+2. In the left navigation, select **Manage**.
+3. Select **Data export**.
+4. Open the **App Insights** tab.
+5. Select **New data export**.
+6. Give the export a friendly name (for example, `ppvnet-dev-export`).
+7. Choose the data types to export (Dataverse diagnostics, Power Automate, and so on).
+8. Select the environment: `<environmentId>`.
+9. Under **Azure details**, select:
+   - Subscription: `<subscriptionId>`
+   - Resource group: `<resourceGroupName>`
+   - Application Insights resource: `<appInsightsResourceName>`
+10. Review the settings and select **Create**.
+
+The export begins routing telemetry to App Insights within a few minutes. The connection string is resolved automatically from the resource picker; you do not need to paste the instrumentation key or connection string manually.
+
+> **Note:** This path was verified against `learn.microsoft.com/power-platform/admin/set-up-export-application-insights` (updated 2026-01-05). Earlier documentation referenced a "Settings → Product → Features → Application Insights" toggle that no longer exists in current PPAC.
 
 ## Find the environment ID
 
