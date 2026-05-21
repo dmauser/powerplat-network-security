@@ -135,7 +135,39 @@ After `03-validate-network.sh`:
 
 If SQL connectivity is slow on first use, note the expected [serverless cold start behavior](./troubleshooting.md#sql-serverless-first-call-cold-start-30s-wake).
 
-After validation passes, proceed to [monitoring.md](./monitoring.md) to confirm telemetry is flowing correctly before testing connector flows.
+After validation passes, proceed to [monitoring.md](./monitoring.md) to confirm observability is in place.
+
+### Network observability verification
+
+Before running connector flows, confirm that Network Security Perimeter and VNet flow logs are active:
+
+**NSP verification:**
+
+```powershell
+$nspName = "nsp-<prefix>-<env>"
+$rg = "rg-<prefix>-<env>"
+Get-AzResource -Name $nspName -ResourceGroupName $rg -ResourceType "Microsoft.Network/networkSecurityPerimeters"
+```
+
+Expected: NSP resource is found with all three resource associations (`assoc-kv`, `assoc-sql`, `assoc-storage`) in Learning mode.
+
+**VNet flow logs verification:**
+
+```powershell
+Get-AzNetworkWatcherFlowLog -NetworkWatcherName "NetworkWatcher_eastus" -ResourceGroupName "NetworkWatcherRG" -Name "fl-vnet-<prefix>-<env>-east"
+```
+
+Expected: Flow log is enabled with `flowAnalyticsConfiguration.enabled = true`.
+
+**Log Analytics readiness:**
+
+Log into the Azure portal, open the Log Analytics workspace, and run this query:
+
+```kql
+NSPAccessLogs | where TimeGenerated > ago(1h) | count
+```
+
+Note: NSP logs and Traffic Analytics summaries appear with **5–15 minute latency**. If the tables are empty after initial deployment, this is normal—wait 15 minutes, run a test flow from the Managed Environment (see Step 5 below), then query again. See [monitoring.md](./monitoring.md#verification-steps) for detailed troubleshooting.
 
 ## Step 5: build connector flows
 

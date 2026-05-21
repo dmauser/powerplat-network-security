@@ -241,10 +241,14 @@ module nspAssociationStorage 'modules/nsp-association.bicep' = if (deployStorage
     targetResourceId: storage!.outputs.storageAccountId
     associationName: 'assoc-storage'
   }
-  dependsOn: [
-    nspAssociationKv
-    if (deploySql) nspAssociationSql
-  ]
+  dependsOn: deploySql
+    ? [
+        nspAssociationKv
+        nspAssociationSql
+      ]
+    : [
+        nspAssociationKv
+      ]
 }
 
 module keyVaultPrivateEndpoint 'modules/private-endpoint.bicep' = {

@@ -61,6 +61,22 @@ That setting is essential to the story. If public access stays enabled, the audi
 
 For this repo specifically, treat network ACL bypass settings as defense-in-depth. Both Key Vault and Storage set `networkAcls.bypass = 'None'` because `publicNetworkAccess = 'Disabled'` already prevents any inbound public traffic; the bypass property applies only to the public-endpoint firewall, which is off, so retaining `'AzureServices'` would add confusion without adding protection. The resulting posture is: **all access to Key Vault and Storage flows exclusively through private endpoints; no public-endpoint bypass is in effect**.
 
+## NSP in Learning mode (audit-only)
+
+Network Security Perimeter (NSP) in Learning mode provides audit-only observability of private endpoint inbound traffic. It does **not** enforce access restrictions or override existing resource-level controls like `publicNetworkAccess: Disabled` or RBAC. 
+
+**NSP Learning mode does not replace:**
+- `publicNetworkAccess: Disabled` — The underlying resource firewall remains in effect and continues to block public traffic.
+- RBAC — Data-plane access control through role assignments is unchanged and remains the primary authorization mechanism.
+- Network-level restrictions — NSPs in Learning mode observe but do not modify traffic flow.
+
+**What NSP Learning mode adds:**
+- Unified audit logs of private endpoint inbound attempts in the `NSPAccessLogs` table in Log Analytics.
+- Visibility into traffic patterns that *would* be denied if NSP were switched to Enforced mode (useful for future enforcement decisions).
+- A foundation for gradual migration toward explicit access rules without risking availability.
+
+For full NSP queries and troubleshooting, see [monitoring.md](./monitoring.md#network-security-perimeter-in-learning-mode).
+
 ## Secret rotation guidance
 
 For the Key Vault demo and any production follow-on:

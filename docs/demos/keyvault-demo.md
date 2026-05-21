@@ -202,6 +202,21 @@ AzureDiagnostics
 
 Expected: `CallerIPAddress_s` is a private IP (starting `10.10.` for the East delegated subnet or `10.20.` for West), **not** a public internet address. This is the definitive proof the request transited the VNet private endpoint.
 
+### NSP audit logs — Network Security Perimeter observability
+
+The Network Security Perimeter in Learning mode captures every private endpoint inbound attempt in the `NSPAccessLogs` table. Run this query in the same Log Analytics workspace:
+
+```kusto
+NSPAccessLogs
+| where Category == "NspPrivateInboundAllowed"
+| where TimeGenerated > ago(15m)
+| where ResourceId contains "Microsoft.KeyVault"
+| project TimeGenerated, SourceAddress, DestinationPort, OperationName
+| order by TimeGenerated desc
+```
+
+Expected: One row per button press, showing the private endpoint inbound traffic. Source address should be a private IP from the delegated subnet (10.10.0.x or 10.20.0.x). This confirms NSP in Learning mode is observing the PE traffic without enforcement.
+
 ---
 
 ## Troubleshooting

@@ -23,7 +23,20 @@ Typical idle cost contributors in this lab are:
 - Private DNS zones.
 - Small-footprint Key Vault and Storage resources.
 - Azure SQL Database, which is often the largest variable component if it is not serverless or paused.
-- Optional monitoring resources if you extend the lab with diagnostics or Log Analytics later.
+- Observability infrastructure: VNet flow logs storage, Traffic Analytics processing, and NSP diagnostic logs to Log Analytics.
+
+| Component | Monthly Cost (Idle/Demo Scale) | Notes |
+|-----------|---------|-------|
+| Private endpoints (3) | ~$7 | Standard PE pricing at ~$0.01/hour each. |
+| Private DNS zones (3) | ~$1 | Standard zone pricing at ~$0.33/month each. |
+| Key Vault | <$1 | Premium tier; operations-based pricing. |
+| Storage account (demo) | <$1 | Standard LRS for static content. |
+| Storage account (flow logs) | <$0.10 | Separate account for VNet flow logs; 30-day auto-delete lifecycle policy. |
+| Traffic Analytics processing | <$1 | ~$2.50/GB processed; demo traffic is <1 MB/day. |
+| Log Analytics ingestion | ~$1–2 | NSP logs + VNet flow analytics + VNet diagnostics; ~$2.76/GB. |
+| Azure SQL Database | Depends on tier | Serverless with auto-pause recommended; cold-start overhead acceptable for demo. |
+
+**Observability stack total:** ~$3–5/month at demo scale (negligible with proper retention policies). See [monitoring.md](./monitoring.md#cost-expectations) for detailed breakdown.
 
 Because Azure prices change, treat this as a qualitative rule of thumb instead of a quote: the network and storage portion of the lab should remain modest, and the SQL choice is the main lever that changes the monthly total.
 
