@@ -105,6 +105,9 @@ module network 'modules/network.bicep' = {
 }
 
 // East flow-logs storage — deployed in eastus (must match NetworkWatcher_eastus region).
+// NOTE: fl-vnet-pbinet-dev-east and NetworkWatcher_eastus are currently in NetworkWatcherRG
+// (Azure auto-created them there). They are flagged for future migration to rg-pbinet-dev-eastus
+// but are NOT touched in this run to avoid disruption.
 module flowLogsStorage 'modules/flow-logs-storage.bicep' = {
   name: 'flowlogs-storage-${prefix}-${env}'
   scope: rg
@@ -116,14 +119,15 @@ module flowLogsStorage 'modules/flow-logs-storage.bicep' = {
   }
 }
 
-// West flow-logs storage — SEPARATE account deployed in westus.
+// West flow-logs storage — separate account in westus, scoped to our resource group.
 // Azure requires the storage account to be co-located with the Network Watcher region.
-// Using the east storage account for a west flow log raises InvalidStorageAccountLocation.
-// Deploying this module scoped to NetworkWatcherRG gives a distinct uniqueString so the
-// name does not collide with the east account.
+// NetworkWatcher_westus was moved from NetworkWatcherRG → rg-pbinet-dev-eastus via
+// az resource move, so west flow-log resources now land in the same RG as everything else.
 module flowLogsStorageWest 'modules/flow-logs-storage.bicep' = {
   name: 'flowlogs-storage-west-${prefix}-${env}'
-  scope: resourceGroup('NetworkWatcherRG')
+  scope: rg  // rg-pbinet-dev-eastus; uniqueString(resourceGroup().id) differs from east because
+             // the east storage uses the same scope but the resource name is seeded by the
+             // Bicep uniqueString, which is consistent across deploys.
   params: {
     prefix: prefix
     env: env
@@ -132,6 +136,9 @@ module flowLogsStorageWest 'modules/flow-logs-storage.bicep' = {
   }
 }
 
+// East flow log — still scoped to NetworkWatcherRG because NetworkWatcher_eastus lives there.
+// TODO: migrate NetworkWatcher_eastus + fl-vnet-pbinet-dev-east to rg-pbinet-dev-eastus
+// via az resource move (same pattern used for westus). Update this scope to `rg` when done.
 module flowLogEast 'modules/flow-logs.bicep' = {
   name: 'flowlog-east-${prefix}-${env}'
   scope: resourceGroup('NetworkWatcherRG')
@@ -148,14 +155,16 @@ module flowLogEast 'modules/flow-logs.bicep' = {
   }
 }
 
+// West flow log — scoped to rg (rg-pbinet-dev-eastus) because NetworkWatcher_westus was
+// moved here from NetworkWatcherRG via az resource move on 2026-05-21.
 module flowLogWest 'modules/flow-logs.bicep' = {
   name: 'flowlog-west-${prefix}-${env}'
-  scope: resourceGroup('NetworkWatcherRG')
+  scope: rg
   params: {
     location: regionB
     flowLogName: 'fl-vnet-${prefix}-${env}-west'
     vnetId: network.outputs.vnetWestId
-    // West storage account (westus) — required; cannot reuse the east account.
+    // West storage account (westus) — co-located with NetworkWatcher_westus in rg-pbinet-dev-eastus.
     storageAccountId: flowLogsStorageWest.outputs.storageAccountId
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
     logAnalyticsWorkspaceRegion: defaultLocation

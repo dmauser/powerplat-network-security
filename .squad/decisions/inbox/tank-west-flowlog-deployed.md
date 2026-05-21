@@ -2,56 +2,59 @@
 <!-- Decision inbox entry for Scribe / record-keeping -->
 
 **From:** Tank  
-**Date:** 2026-05-21T17:55:00-05:00  
-**For:** Scribe (record), Morpheus (arch confirmation)
+**Date:** 2026-05-21T18:15:00-05:00  
+**For:** Scribe (record), Morpheus (arch confirmation), dmauser (RG layout confirmation)
 
 ---
 
 ## Summary
 
-West VNet flow log (`fl-vnet-pbinet-dev-west`) is **deployed and enabled** in `NetworkWatcherRG`. Both east and west flow logs are now active and writing to Log Analytics.
+West VNet flow log is **deployed, enabled, and fully inside `rg-pbinet-dev-eastus`** per directive.
+`NetworkWatcher_westus` and its flow-log child were moved from `NetworkWatcherRG` to `rg-pbinet-dev-eastus` via `az resource move`.
 
 ---
 
-## What was deployed
+## Final resource placement
 
 | Resource | Name | RG | Region | Status |
 |---|---|---|---|---|
-| West flow-logs storage account | `stpbinetfldevwiqxkvrtksy` | `NetworkWatcherRG` | `westus` | ✅ Succeeded |
-| West VNet flow log | `fl-vnet-pbinet-dev-west` | `NetworkWatcherRG` | `westus` | ✅ Enabled |
+| Network Watcher (west) | `NetworkWatcher_westus` | `rg-pbinet-dev-eastus` | `westus` | ✅ Succeeded |
+| Flow-logs storage (west) | `stpbinetfldevwiqxkvrtksy` | `rg-pbinet-dev-eastus` | `westus` | ✅ Moved |
+| VNet flow log (west) | `fl-vnet-pbinet-dev-west` | `rg-pbinet-dev-eastus` | `westus` | ✅ Enabled |
+| Network Watcher (east) | `NetworkWatcher_eastus` | `NetworkWatcherRG` | `eastus` | ⚠️ Flagged — still in NetworkWatcherRG |
+| VNet flow log (east) | `fl-vnet-pbinet-dev-east` | `NetworkWatcherRG` | `eastus` | ⚠️ Flagged — still in NetworkWatcherRG |
 
 ---
 
-## Root cause of original failure
+## Platform constraint discovered (and resolved for west)
 
-`infra/main.bicep` was passing the **east** storage account (`stpbinetfldevk6ozyjremes`, `eastus`) to the west flow log module. Azure requires the storage account to be co-located with the Network Watcher region (`westus`). ARM error: `InvalidStorageAccountLocation`.
+`az network watcher configure -g rg-pbinet-dev-eastus --locations westus` silently returned
+the existing `NetworkWatcherRG`-hosted watcher — it does NOT re-create the watcher in a
+different RG when one already exists for that region. Azure enforces one watcher per region
+per subscription.
 
-**Fix committed:** `main.bicep` now deploys a second `flowLogsStorageWest` module (scoped to `NetworkWatcherRG`, location `westus`) and passes its output to `flowLogWest`. The west storage account name is generated via `uniqueString(resourceGroup().id)` where the RG is `NetworkWatcherRG` — different hash from the east account, no name collision.
+**Resolution used:** `az resource move` — this DOES support moving `Microsoft.Network/networkWatchers`
+between resource groups within the same subscription. The child flow log resource moved automatically
+with the parent watcher. The west flow-logs storage account was moved separately in the same call.
+
+After the move, the flow log's `storageId` still referenced the old `NetworkWatcherRG` path.
+A second `az deployment group create` (scoped to `rg-pbinet-dev-eastus`) corrected the reference.
 
 ---
 
-## Commands used
+## Commands executed (in order)
 
-### Step 1 — West flow-logs storage (westus, scoped to NetworkWatcherRG)
-
+### 1 — West flow-logs storage (initial deploy into NetworkWatcherRG — pre-directive)
 ```bash
 az deployment group create \
   --name flowlogs-stg-west-202605211751 \
   --resource-group NetworkWatcherRG \
   --template-file infra/modules/flow-logs-storage.bicep \
   --parameters "@.azure/flowlogs-stg-west-params.json"
+# Output: stpbinetfldevwiqxkvrtksy (westus)
 ```
 
-Output:
-```json
-{
-  "storageAccountId": "/subscriptions/43d55e51-58fe-486f-9e2a-ba56b8dd15de/resourceGroups/NetworkWatcherRG/providers/Microsoft.Storage/storageAccounts/stpbinetfldevwiqxkvrtksy",
-  "storageAccountName": "stpbinetfldevwiqxkvrtksy"
-}
-```
-
-### Step 2 — West flow log (targeting vnet-pbinet-dev-west, NetworkWatcher_westus)
-
+### 2 — West flow log (initial deploy into NetworkWatcherRG — pre-directive)
 ```bash
 az deployment group create \
   --name flowlog-west-202605211753 \
@@ -60,42 +63,68 @@ az deployment group create \
   --parameters "@.azure/flowlog-west-params.json"
 ```
 
-Key parameters:
-- `location`: `westus`
-- `flowLogName`: `fl-vnet-pbinet-dev-west`
-- `vnetId`: `.../vnet-pbinet-dev-west`
-- `storageAccountId`: `.../stpbinetfldevwiqxkvrtksy` (westus — new)
-- `logAnalyticsWorkspaceId`: `.../law-pbinet-dev-k6ozyjremes6m` (eastus LAW — cross-region is fine for TA)
-- `logAnalyticsWorkspaceRegion`: `eastus`
-- `logAnalyticsWorkspaceGuid`: `9392a56e-0e4c-41f7-bd0c-829b94972d42`
-- `networkWatcherName`: `NetworkWatcher_westus`
+### 3 — Move watcher + storage to rg-pbinet-dev-eastus (per directive)
+```bash
+az resource move \
+  --destination-group rg-pbinet-dev-eastus \
+  --ids \
+    /subscriptions/43d55e51.../NetworkWatcherRG/.../networkWatchers/NetworkWatcher_westus \
+    /subscriptions/43d55e51.../NetworkWatcherRG/.../storageAccounts/stpbinetfldevwiqxkvrtksy
+# Exit 0 — both resources moved, child flow log moved with parent watcher
+```
+
+### 4 — Fix storageId reference after move
+```bash
+az deployment group create \
+  --name flowlog-west-fix-202605211810 \
+  --resource-group rg-pbinet-dev-eastus \
+  --template-file infra/modules/flow-logs.bicep \
+  --parameters "@.azure/flowlog-west-params.json"
+# storageId now: .../rg-pbinet-dev-eastus/.../stpbinetfldevwiqxkvrtksy
+```
 
 ---
 
 ## Verification output
 
-### `az network watcher flow-log list --location westus`
-
 ```
-Enabled  Location  Name                     ProvisioningState  StorageId
--------  --------  -----------------------  -----------------  ----------------------------------------
-True     westus    fl-vnet-pbinet-dev-west  Succeeded          .../stpbinetfldevwiqxkvrtksy
-```
-Target VNet GUID: `74e9ffd9-6e68-4320-ae8d-1b734d1bea43` (`vnet-pbinet-dev-west`)
+az network watcher flow-log list --location westus
 
-### `az network watcher flow-log list --location eastus`
+Enabled  RG                    Name                     State      Storage
+True     rg-pbinet-dev-eastus  fl-vnet-pbinet-dev-west  Succeeded  .../rg-pbinet-dev-eastus/.../stpbinetfldevwiqxkvrtksy
 
-```
-Enabled  Location  Name                     ProvisioningState  StorageId
--------  --------  -----------------------  -----------------  ----------------------------------------
-True     eastus    fl-vnet-pbinet-dev-east  Succeeded          .../stpbinetfldevk6ozyjremes
-```
-Target VNet GUID: `e8cbf9cb-bf2c-4691-b866-a3b53599b149` (`vnet-pbinet-dev-east`)
+az network watcher flow-log list --location eastus
 
-Both flow logs: **Enabled = True, ProvisioningState = Succeeded.**
+Enabled  RG                Name                     State
+True     NetworkWatcherRG  fl-vnet-pbinet-dev-east  Succeeded
+```
 
 ---
 
-## Bicep fix committed
+## East flow log / watcher — migration flag
 
-`infra/main.bicep` updated — `flowLogsStorageWest` module added, `flowLogWest.storageAccountId` now correctly references west storage. Safe for future `az deployment sub create` runs.
+`NetworkWatcher_eastus` and `fl-vnet-pbinet-dev-east` are still in `NetworkWatcherRG`.
+Same `az resource move` pattern applies when Damião wants to consolidate:
+
+```bash
+EAST_WATCHER_ID=".../NetworkWatcherRG/.../networkWatchers/NetworkWatcher_eastus"
+EAST_STORAGE_ID=".../rg-pbinet-dev-eastus/.../storageAccounts/stpbinetfldevk6ozyjremes"
+# Note: east storage is ALREADY in rg-pbinet-dev-eastus — only the watcher needs moving.
+az resource move \
+  --destination-group rg-pbinet-dev-eastus \
+  --ids $EAST_WATCHER_ID
+# Then re-deploy flowlog-east scoped to rg instead of resourceGroup('NetworkWatcherRG')
+```
+
+The east storage account `stpbinetfldevk6ozyjremes` is already in `rg-pbinet-dev-eastus`
+(it was deployed there from the start). Only the watcher + flow log need to move.
+
+---
+
+## Bicep change committed
+
+`infra/main.bicep`:
+- `flowLogsStorageWest` scope changed from `resourceGroup('NetworkWatcherRG')` → `rg`
+- `flowLogWest` scope changed from `resourceGroup('NetworkWatcherRG')` → `rg`
+- `flowLogEast` scope left as `resourceGroup('NetworkWatcherRG')` with TODO comment
+- Inline comments document the RG migration history
