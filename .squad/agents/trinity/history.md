@@ -35,6 +35,10 @@
   - **Subscription context drift:** sync/async PowerShell shells can have different active subscriptions. Always `az account show` per shell. Fix: `az account set --subscription`.
   - **App Insights unwired:** `infra/modules/appInsights.bicep` existed but was never called from `main.bicep`. Wired in this session.
 
+- 2026-05-21 — **NSP module structure:** `infra/modules/nsp.bicep` now owns the perimeter, profile, and full NSP diagnostic settings fan-out to Log Analytics; `infra/modules/nsp-association.bicep` uses `existing` perimeter/profile references and defaults each association to `Learning` for audit-only rollout.
+- 2026-05-21 — **Flow logs cross-RG scope pattern:** `infra/modules/flow-logs.bicep` is deployed with `scope: resourceGroup('NetworkWatcherRG')` and attaches flow logs under the existing `NetworkWatcher_<region>` resource for each VNet region. The lab resource group only hosts the dedicated flow-logs storage account.
+- 2026-05-21 — **API versions used:** Pinned `Microsoft.Network/networkSecurityPerimeters@2023-08-01-preview`, `Microsoft.Network/networkSecurityPerimeters/profiles@2023-08-01-preview`, `Microsoft.Network/networkSecurityPerimeters/resourceAssociations@2023-11-01`, `Microsoft.Network/networkWatchers@2024-05-01`, and `Microsoft.Network/networkWatchers/flowLogs@2024-05-01` per Morpheus's audit spec.
+
 ## Punch List — Queued for Trinity (2026-05-20T21:06:15-05:00)
 
 **P1 — Deploy SQL (retry or fallback):** East US was at capacity during Phase 1 deployment. Options:
