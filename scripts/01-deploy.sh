@@ -36,6 +36,7 @@ main() {
   local deploy_json outputs_file
   local enterprise_policy_arm_id key_vault_name key_vault_uri sql_server_fqdn sql_database_name storage_account_name uami_resource_id uami_principal_id
   local nsp_name nsp_id flow_logs_storage_name log_analytics_workspace_name
+  local function_app_east_name function_app_east_hostname function_app_west_name function_app_west_hostname
   local -a demo_user_oids=()
   local auto_demo_user=true
   local signed_in_oid demo_user_json
@@ -152,6 +153,10 @@ main() {
   nsp_id="$(jq -r '.nspId.value // ""' "$outputs_file")"
   flow_logs_storage_name="$(jq -r '.flowLogsStorageName.value // ""' "$outputs_file")"
   log_analytics_workspace_name="$(jq -r '.logAnalyticsWorkspaceName.value // ""' "$outputs_file")"
+  function_app_east_name="$(jq -r '.functionAppEastName.value // ""' "$outputs_file")"
+  function_app_east_hostname="$(jq -r '.functionAppEastHostname.value // ""' "$outputs_file")"
+  function_app_west_name="$(jq -r '.functionAppWestName.value // ""' "$outputs_file")"
+  function_app_west_hostname="$(jq -r '.functionAppWestHostname.value // ""' "$outputs_file")"
 
   ok "Deployment completed"
   echo
@@ -169,10 +174,15 @@ main() {
   echo "LAW workspace            : ${log_analytics_workspace_name:-not returned by template}"
   echo "UAMI resource ID         : ${uami_resource_id}"
   echo "UAMI principal ID        : ${uami_principal_id}"
+  echo "Function App East        : ${function_app_east_name:-not deployed}"
+  echo "Function App East URL    : https://${function_app_east_hostname:-n/a}/api/GetSecret"
+  echo "Function App West        : ${function_app_west_name:-not deployed}"
+  echo "Function App West URL    : https://${function_app_west_hostname:-n/a}/api/GetSecret"
   echo
   echo "✅ NSP deployed in Learning mode. Check NSPAccessLogs in LAW ${log_analytics_workspace_name:-<workspaceName>}."
   echo "Saved outputs to ${outputs_file}"
-  echo "Next: Run ./scripts/02-configure-pp-vnet.ps1"
+  echo "Next: Run ./scripts/04-deploy-functions.ps1 to publish function code to both Function Apps"
+  echo "      Then ./scripts/02-configure-pp-vnet.ps1"
   echo "Note: Traffic Analytics auto-provisions the NetworkMonitoring solution after the first processed flow-log batch; no manual AzureNetworkAnalytics install step is required."
   echo "Note: remember to chmod +x scripts/*.sh (and later git update-index --chmod=+x for tracked shell scripts)."
 }

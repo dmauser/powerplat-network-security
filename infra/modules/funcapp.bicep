@@ -44,6 +44,12 @@ param keyVaultName string
 @description('Optional. Resource ID of the Log Analytics workspace for diagnostic settings. Leave empty to skip.')
 param logAnalyticsWorkspaceId string = ''
 
+@description('App Service Plan SKU name. Use EP1/EP2/EP3 for Elastic Premium (recommended; requires compute quota). Use S1/P1v2 for Dedicated when EP quota is unavailable. Consumption (Y1/Dynamic) does NOT support regional VNet integration and must not be used with private endpoints.')
+param aspSkuName string = 'EP1'
+
+@description('App Service Plan SKU tier. Must match aspSkuName: ElasticPremium for EP*, Standard for S*, PremiumV2 for P*v2.')
+param aspSkuTier string = 'ElasticPremium'
+
 // ---------------------------------------------------------------------------
 // Role definition IDs (built-in, tenant-invariant)
 // ---------------------------------------------------------------------------
@@ -107,13 +113,13 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   location: location
   tags: tags
   sku: {
-    name: 'EP1'
-    tier: 'ElasticPremium'
+    name: aspSkuName
+    tier: aspSkuTier
   }
-  kind: 'elastic'
+  kind: aspSkuTier == 'ElasticPremium' ? 'elastic' : 'linux'
   properties: {
     reserved: true // Linux
-    maximumElasticWorkerCount: 20
+    maximumElasticWorkerCount: aspSkuTier == 'ElasticPremium' ? 20 : null
   }
 }
 
@@ -146,6 +152,10 @@ resource funcApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'KEY_VAULT_NAME'
           value: keyVaultName
+        }
+        {
+          name: 'REGION'
+          value: regionSuffix
         }
         {
           name: 'SECRET_NAME'

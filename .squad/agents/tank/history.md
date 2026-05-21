@@ -20,7 +20,24 @@
 - **RBAC confirmed missing at 12:46 on 2026-05-21.** `az role assignment list` on the KV scope shows only one entry: `Key Vault Secrets User` on a `ServicePrincipal` (the UAMI from Bicep). No user assignment for `admin@MngEnvMCAP423074.onmicrosoft.com`. CLI couldn't resolve the UPN (`az ad user show` fails — CLI signed into a different tenant), so portal IAM is the reliable fallback for granting the role.
 - **Portal IAM path:** KV → **Access control (IAM)** → **+ Add role assignment** → **Key Vault Secrets User** → select `admin@...` → assign. Allow 2–5 min for propagation before retrying in Power Apps.
 
-## Learnings — 2026-05-21T12:46:19-05:00 (KV connector formula fix)
+## Learnings — 2026-05-21T17:10:00-05:00 (Part 4 dual-region function app deploy)
+
+- **Publish approach:** ARM zip deploy (`az functionapp deploy --src-path <zip> --type zip`) uses `PUT .../sites/{name}/extensions/ZipDeploy` on the ARM management plane — does NOT touch Kudu/SCM. Safe when `publicNetworkAccess=Disabled`. This is the correct approach for all-private function apps. Fallback: upload zip to function storage, generate user-delegation SAS (no shared-key auth required since `allowSharedKeyAccess=false`), set `WEBSITE_RUN_FROM_PACKAGE` to SAS URL.
+- **CallerIPAddress ranges:** Architecturally expected: `10.10.2.X` (east snet-funcapp /27) and `10.20.2.X` (west snet-funcapp /27). West function reaches east KV via VNet peering → east KV PE. Not live-verified in this session due to MCAP quota constraint (see below).
+- **DNS / PE:** No gotchas. Trinity's Bicep already links `privatelink.vaultcore.azure.net` to both VNets. West function resolves KV hostname to east PE IP (10.10.1.X) correctly via zone link. `privatelink.azurewebsites.net`, `privatelink.blob.core.windows.net`, and `privatelink.file.core.windows.net` zones also exist and are linked to both VNets (verified in private-dns.bicep).
+- **MCAP subscription quota:** Internal MCAP subscriptions (`MngEnvMCAP423074`) may return `InternalSubscriptionIsOverQuotaForSku` with `Total VMs: 0` for ALL App Service Plan SKUs — EP1, S1, P1v2, B1 all blocked. This is a subscription-level hard limit, not a regional capacity issue. Fix: request quota increase or use a Pay-As-You-Go subscription. Added `aspSkuName`/`aspSkuTier` parameters to `funcapp.bicep` so operators can override SKU without touching the module.
+- **Raw REST vs Az.KeyVault:** Chose raw `Invoke-RestMethod` (IMDS token + KV REST API) over `Az.KeyVault` module in `run.ps1` because: (1) no module load → faster cold start; (2) `Invoke-RestMethod` calls are explicitly auto-tracked by the App Insights SDK in the Functions PowerShell runtime, guaranteeing entries in the `dependencies` table — this closes the Part 4 App Insights gap. Az.KeyVault's internal .NET HttpClient calls may not be tracked the same way.
+- **Zip layout:** `Compress-Archive -Path <folder>\* -DestinationPath <zip>` (note the `\*` glob) puts files at the zip root — `host.json` at root, `GetSecret/` subfolder. This is the required Functions zip layout. Verify with `[System.IO.Compression.ZipFile]::OpenRead($zip).Entries.FullName` before deploying.
+
+## Punch List — Part 4 Unblock (2026-05-21T17:10:00-05:00)
+
+1. Request App Service Plan VM quota for `eastus` and `westus` (minimum 2 × EP1 vCPUs, or 2 × S1 Standard vCPUs).
+2. Run: `az deployment group create --resource-group rg-pbinet-dev-eastus --template-file infra/deploy-funcapp-only.bicep --parameters aspSkuName=S1 aspSkuTier=Standard`
+3. Run: `pwsh scripts/04-deploy-functions.ps1`
+4. Verify smoke test output (see `04-deploy-functions.ps1` → `Invoke-SmokeTest`).
+5. Copy actual KQL rows into `.squad/decisions/inbox/tank-part4-deploy-verified.md` replacing the architectural placeholders.
+
+
 
 - **GetSecret signature:** The Azure Key Vault connector `GetSecret` action takes **one** parameter — `secretName` only. The vault name is bound when the connection is created (entered in the connection dialog), not passed to the function. Passing vault name as a first arg (`GetSecret("vault", "secret")`) has no valid overload in Canvas Apps and produces a red underline. Correct: `AzureKeyVault.GetSecret("demo-secret").value`. Confirmed against `https://learn.microsoft.com/en-us/connectors/keyvault/` — Parameters section lists only `secretName (True, string)`.
 - **Namespace red underline = missing connection:** If the entire `AzureKeyVault.*` namespace shows red (not just a bad argument), the connector was never added to the app under Data. The formula bar can't resolve the namespace until **Data → + Add data → Azure Key Vault → Connect** is completed. Always verify the connection appears in the Data panel before writing the formula.
