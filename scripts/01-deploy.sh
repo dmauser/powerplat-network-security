@@ -7,6 +7,10 @@ set -euo pipefail
 #   --what-if                 Run az deployment sub what-if and exit.
 #   --parameters-file <path>  Parameters file path. Default: infra/parameters/dev.parameters.json
 #   --location <region>       Subscription deployment metadata location. Default: eastus
+#   --demo-user-oid <oid>     Additional AAD user object ID granted Key Vault Secrets User on the demo
+#                             vault. Repeat the flag for multiple users. Defaults to the current
+#                             signed-in user (so the Power Apps KV connector can read demo-secret).
+#   --no-auto-demo-user       Skip auto-adding the signed-in user to demoUserPrincipalIds.
 
 GREEN='\033[1;32m'
 RED='\033[1;31m'
@@ -31,6 +35,9 @@ main() {
   local deployment_name
   local deploy_json outputs_file
   local enterprise_policy_arm_id key_vault_name key_vault_uri sql_server_fqdn sql_database_name storage_account_name uami_resource_id uami_principal_id
+  local -a demo_user_oids=()
+  local auto_demo_user=true
+  local signed_in_oid demo_user_json
 
   if ! command -v az >/dev/null 2>&1; then
     fail 'Azure CLI (az) is required.'
@@ -56,6 +63,14 @@ main() {
         location="$2"
         shift 2
         ;;
+      --demo-user-oid)
+        demo_user_oids+=("$2")
+        shift 2
+        ;;
+      --no-auto-demo-user)
+        auto_demo_user=false
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -80,12 +95,30 @@ main() {
 
   deployment_name="pp-vnet-kv-demo-$(date +%Y%m%d%H%M)"
 
+  # Auto-include the signed-in user so the Power Apps Key Vault connector (per-user OAuth)
+  # can read demo-secret from the VNet-injected Managed Environment.
+  if [[ "$auto_demo_user" == true ]]; then
+    if signed_in_oid="$(az ad signed-in-user show --query id -o tsv 2>/dev/null)" && [[ -n "$signed_in_oid" ]]; then
+      demo_user_oids+=("$signed_in_oid")
+    else
+      echo "Warning: could not resolve signed-in user OID; demoUserPrincipalIds will only include explicit --demo-user-oid values." >&2
+    fi
+  fi
+
+  # Deduplicate.
+  if [[ ${#demo_user_oids[@]} -gt 0 ]]; then
+    demo_user_json="$(printf '%s\n' "${demo_user_oids[@]}" | awk '!seen[$0]++' | jq -R . | jq -s -c .)"
+  else
+    demo_user_json='[]'
+  fi
+
   if [[ "$what_if" == true ]]; then
     echo "Running what-if deployment preview..."
     az deployment sub what-if \
       --location "$location" \
       --template-file "infra/main.bicep" \
-      --parameters "@${parameters_file}"
+      --parameters "@${parameters_file}" \
+      --parameters "demoUserPrincipalIds=${demo_user_json}"
 
     ok "What-if completed"
     echo "Note: remember to chmod +x scripts/*.sh (and later git update-index --chmod=+x for tracked shell scripts)."
@@ -93,11 +126,13 @@ main() {
   fi
 
   echo "Running subscription deployment ${deployment_name}..."
+  echo "Demo user OIDs granted Key Vault Secrets User: ${demo_user_json}"
   deploy_json="$(az deployment sub create \
     --name "$deployment_name" \
     --location "$location" \
     --template-file "infra/main.bicep" \
     --parameters "@${parameters_file}" \
+    --parameters "demoUserPrincipalIds=${demo_user_json}" \
     -o json)"
 
   mkdir -p .azure

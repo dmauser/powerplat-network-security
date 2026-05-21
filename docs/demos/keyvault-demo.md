@@ -53,7 +53,15 @@ az keyvault secret set \
 
 ### c. Grant Daniel `Key Vault Secrets User` role
 
-> **Required.** Live check (`2026-05-21`) confirmed `admin@MngEnvMCAP423074.onmicrosoft.com` has **no** role assignments on the vault. The Power Apps Key Vault connector uses the signed-in user's delegated identity (OAuth), so the user reading the secret in the app must hold this role.
+> **Automated.** `scripts/01-deploy.sh` now auto-grants the signed-in deploy user `Key Vault Secrets User` on the demo vault via the `demoUserPrincipalIds` parameter on `infra/modules/keyvault.bicep`. The Power Apps Key Vault connector uses the signed-in user's delegated identity (OAuth), so the demo operator must hold this role on the vault.
+>
+> If you ran an earlier version of `01-deploy.sh` (before this automation), or you are demoing with a different user than the one who deployed, add that user's object ID and re-run the deployment:
+>
+> ```bash
+> ./scripts/01-deploy.sh --demo-user-oid <objectId>
+> ```
+>
+> The block below is the manual fallback (use it if you cannot redeploy).
 
 ```bash
 az role assignment create \
@@ -144,8 +152,12 @@ Set(secretValue, AzureKeyVault.GetSecret("demo-secret").value)
 2. Insert a **Label**. Set `Text`:
 
 ```text
-secretValue
+If(IsBlank(secretValue), "(click button)", secretValue)
 ```
+
+The `IsBlank` wrapper displays `(click button)` before the first click and shows the secret value after — avoiding a blank label that is indistinguishable from a connector failure. (See Troubleshooting → "Surface the error" for diagnostic techniques.)
+
+See [Appendix — Verified screen YAML](#appendix--verified-screen-yaml) for the full known-good Screen1 definition.
 
 ### Step 5 — Save, Play, click the button
 
@@ -154,6 +166,8 @@ secretValue
 - Label should display: `Hello from private Key Vault`
 
 This success — while Part 1 showed `ForbiddenByConnection` — proves the Managed Environment is routing through the delegated subnet → private endpoint `pep-kv-pbinet-dev` (NIC IP `10.10.1.4`).
+
+> **Verified (2026-05-21):** Demo confirmed working end-to-end. The fix path (RBAC automation via `demoUserPrincipalIds` in `infra/modules/keyvault.bicep` and auto-grant in `scripts/01-deploy.sh`) is now baked into fresh deployments — no manual role grant required if you deploy via the current deployment script.
 
 ---
 
@@ -194,6 +208,7 @@ Expected: `CallerIPAddress_s` is a private IP (starting `10.10.` for the East de
 
 | Symptom | Fix |
 |---|---|
+| **Label stays blank, no error banner** | Canvas silently swallows connector 403s into a blank variable. Almost always RBAC. See "Surface the error" below, then grant `Key Vault Secrets User`. |
 | `AzureKeyVault.*` shows red underline in formula bar | Connection not added to this app. Go to **Data → + Add data → Azure Key Vault** and complete the connection setup (Step 3) before typing any formula. |
 | Red underline specifically on `GetSecret("vault-name", "secret-name")` | Wrong signature. `GetSecret` takes **one** argument (secret name only). Vault is bound in the connection. Fix: `AzureKeyVault.GetSecret("demo-secret").value` |
 | Connector creation fails: "no network path" | ME may not have refreshed subnet injection — wait 5–10 min, retry. Recheck `docs/managed-environment-setup.md`. |
@@ -201,6 +216,35 @@ Expected: `CallerIPAddress_s` is a private IP (starting `10.10.` for the East de
 | `AzureKeyVault.GetSecret` returns null | Secret name is case-sensitive. Confirm it is exactly `demo-secret`. Confirm the connection is signed in as `admin@MngEnvMCAP423074.onmicrosoft.com`. |
 | App Insights shows no rows | App Insights data export may not be bound yet. Follow [lab-completion-checklist.md → Step 1](../lab-completion-checklist.md#step-1-bind-application-insights-for-telemetry-ppac). Allow 5–10 min after binding. |
 | `AzureDiagnostics` returns no rows | KV diagnostic settings stream to `law-pbinet-dev-k6ozyjremes6m`. Verify the `diag-kv` diagnostic setting is enabled (`AuditEvent` category). Logs may take up to 5 min to arrive. |
+
+### Surface the error (blank label diagnostic)
+
+Add a second label to the canvas. Set its `Text` to:
+
+```text
+IfError(
+    AzureKeyVault.GetSecret("demo-secret").value,
+    FirstError.Message & " | " & FirstError.Source,
+    "ok: " & AzureKeyVault.GetSecret("demo-secret").value
+)
+```
+
+Play the app. If the label shows `403` or `Forbidden` — RBAC is missing. Go to Pre-flight §c and grant the role, then wait 5 min.
+
+### Grant RBAC from Azure Portal (if az CLI can't resolve the user)
+
+Azure Portal → `kv-pbinet-dev-k6ozyjreme` → **Access control (IAM)** → **+ Add** → **Add role assignment** → **Key Vault Secrets User** → **Next** → **+ Select members** → type `admin@MngEnvMCAP423074.onmicrosoft.com` → **Select** → **Review + assign**.
+
+Or via CLI (run as a user who CAN resolve the assignee in the tenant):
+
+```bash
+az role assignment create \
+  --assignee "admin@MngEnvMCAP423074.onmicrosoft.com" \
+  --role "Key Vault Secrets User" \
+  --scope "/subscriptions/43d55e51-58fe-486f-9e2a-ba56b8dd15de/resourceGroups/rg-pbinet-dev-eastus/providers/Microsoft.KeyVault/vaults/kv-pbinet-dev-k6ozyjreme"
+```
+
+Wait 2–5 min for propagation, then retry the app (re-click the button in Play mode).
 
 ---
 
@@ -217,6 +261,14 @@ Delete the Canvas App: `make.powerapps.com` → **Apps** → `KV VNet Demo` → 
 
 ---
 
+## Recent changes
+
+- **Bicep automation:** `infra/modules/keyvault.bicep` and `infra/main.bicep` now accept `demoUserPrincipalIds` array parameter to emit `Key Vault Secrets User` role assignments (principalType: User) per OID. Enables fresh deployments to auto-grant the demo operator without post-deployment manual steps.
+- **Deploy script:** `scripts/01-deploy.sh` now auto-resolves the signed-in user via `az ad signed-in-user show` and passes their OID to the Bicep `demoUserPrincipalIds` parameter. Supports `--demo-user-oid <oid>` (repeatable) and `--no-auto-demo-user` flags for override.
+- **Pre-flight §c:** Rewritten as "Automated" (via `01-deploy.sh`) with manual fallback retained.
+
+---
+
 ## References
 
 - [Azure Key Vault connector](https://learn.microsoft.com/en-us/connectors/keyvault/)
@@ -224,3 +276,49 @@ Delete the Canvas App: `make.powerapps.com` → **Apps** → `KV VNet Demo` → 
 - [Key Vault private link service](https://learn.microsoft.com/en-us/azure/key-vault/general/private-link-service)
 - [Connector walkthrough (detailed)](../connectors/keyvault.md)
 - [Lab completion checklist](../lab-completion-checklist.md)
+
+---
+
+## Appendix — Verified screen YAML
+
+The YAML below is the exact definition from the verified working Canvas App (Screen1 with Button1 + Label2) that produced the success shown in Part 2. Use it as a copy-paste reference when rebuilding the demo from scratch or diagnosing a broken app against a known-good baseline.
+
+The Label uses the `If(IsBlank(secretValue), ...)` pattern from Step 4, ensuring the empty state is visually distinct from a connector failure.
+
+**Note:** Button1 preserves the user's original text spelling (`"Buttom"`) and trailing newline verbatim to match what has been verified to work. For a polished demo, consider fixing it to `="Button"` — but the YAML below is left unchanged for baseline reproducibility.
+
+```yaml
+Screens:
+  Screen1:
+    Properties:
+      LoadingSpinnerColor: =RGBA(56, 96, 178, 1)
+    Children:
+      - Button1:
+          Control: Classic/Button@2.2.0
+          Properties:
+            BorderColor: =ColorFade(Self.Fill, -15%)
+            Color: =RGBA(255, 255, 255, 1)
+            DisabledBorderColor: =RGBA(166, 166, 166, 1)
+            Fill: =RGBA(56, 96, 178, 1)
+            Font: =Font.'Open Sans'
+            HoverBorderColor: =ColorFade(Self.BorderColor, 20%)
+            HoverColor: =RGBA(255, 255, 255, 1)
+            HoverFill: =ColorFade(RGBA(56, 96, 178, 1), -20%)
+            OnSelect: =Set(secretValue, AzureKeyVault.GetSecret("demo-secret").value)
+            PressedBorderColor: =Self.Fill
+            PressedColor: =Self.Fill
+            PressedFill: =Self.Color
+            Text: |-
+              ="Buttom
+              "
+            X: =40
+            Y: =40
+      - Label2:
+          Control: Label@2.5.1
+          Properties:
+            BorderColor: =RGBA(0, 18, 107, 1)
+            Font: =Font.'Open Sans'
+            Text: =If(IsBlank(secretValue), "(click button)", secretValue)
+            X: =50
+            Y: =170
+```

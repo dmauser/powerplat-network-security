@@ -1,7 +1,7 @@
 # Squad Decisions
 
-**Last Updated:** 2026-05-21T12:46:19-05:00  
-**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion + Phase 2 attempt #2 (Trial env blocker + BAP REST confirmation) + Phase 2 success (ME linked, App Insights binding blocked) + KV demo guide structure + live-verification findings + KV connector formula fix
+**Last Updated:** 2026-05-21T14:27:57-05:00  
+**Source:** Lab audit + Phase 1 deployment + Phase 2 prep completion + Phase 2 attempt #2 (Trial env blocker + BAP REST confirmation) + Phase 2 success (ME linked, App Insights binding blocked) + KV demo guide structure + live-verification findings + KV connector formula fix + KV demo RBAC automation
 
 ## Phase 2 Outcome (Tank, 2026-05-21T04:20:00Z)
 
@@ -792,6 +792,44 @@ Set(secretValue, AzureKeyVault.GetSecret("demo-secret").value)
 - `docs/demos/keyvault-demo.md` — Step 3 now has a callout: "Do this before typing any formula" and explains the vault-name-in-connection pattern. Step 4 formula corrected to single-argument form. Troubleshooting table gained two new rows covering the red-underline symptoms.
 
 **Secondary finding:** The red underline on the entire `AzureKeyVault` namespace (not just the argument count) indicates the connection was not added to the app. Step 3 now explicitly warns: confirm `kv-demo` appears in the Data panel before proceeding to Step 4.
+
+---
+
+## KV Demo RBAC Automation Now Baked Into Deploy Script + Bicep (Niobe, 2026-05-21T14:27:57-05:00)
+
+### Summary
+
+The Key Vault demo (docs/demos/keyvault-demo.md) was failing with HTTP 403 because the demo operator had no `Key Vault Secrets User` role on the vault. The Power Apps Key Vault connector uses per-user OAuth delegation, so every demo operator must hold this role.
+
+**Resolution:** Automation is now baked into the deploy pipeline:
+
+1. **Bicep:** `infra/modules/keyvault.bicep` and `infra/main.bicep` accept a `demoUserPrincipalIds` array parameter that emits role assignments (principalType: User, role: Key Vault Secrets User).
+2. **Deploy Script:** `scripts/01-deploy.sh` auto-resolves the signed-in user via `az ad signed-in-user show` and passes the OID to the `demoUserPrincipalIds` parameter. Supports:
+   - `--demo-user-oid <oid>` (repeatable for multiple users)
+   - `--no-auto-demo-user` (suppress auto-grant)
+3. **Documentation:** `docs/demos/keyvault-demo.md` pre-flight §c rewritten as "Automated" with manual fallback for edge cases.
+
+### Outcome
+
+Fresh deployments via `scripts/01-deploy.sh` automatically grant the signed-in user `Key Vault Secrets User` on the demo vault. No post-deploy manual steps required.
+
+**Demo verified working (2026-05-21):** Button press → label displays "Hello from private Key Vault".
+
+### Implication for Team
+
+Connector-specific RBAC requirements (especially per-user OAuth flows) should be:
+- **Pre-seeded** at IaC layer (Bicep parameters for demo user OIDs)
+- **Auto-granted** in deploy scripts (resolve signed-in user, inject into Bicep)
+- **Documented** as "Automated (with manual fallback)" in pre-flight guides
+
+This pattern reduces demo friction and ensures repeatability.
+
+### Files Modified
+
+- `infra/modules/keyvault.bicep` — added `demoUserPrincipalIds` parameter
+- `infra/main.bicep` — wired `demoUserPrincipalIds` through to KV module
+- `scripts/01-deploy.sh` — auto-resolve and inject `--demo-user-oid`
+- `docs/demos/keyvault-demo.md` — pre-flight §c rewritten; "Recent changes" section added with verification callout
 
 ---
 

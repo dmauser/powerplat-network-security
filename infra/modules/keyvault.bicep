@@ -16,6 +16,9 @@ param tenantId string = subscription().tenantId
 @description('Principal ID of the user-assigned managed identity granted access to Key Vault secrets.')
 param uamiPrincipalId string
 
+@description('Optional. Object IDs of interactive users (e.g., demo operator) granted Key Vault Secrets User. Used so the Power Apps Key Vault connector (per-user OAuth) can read demo-secret from the VNet-injected Managed Environment.')
+param demoUserPrincipalIds array = []
+
 @description('Optional. Resource ID of the Log Analytics workspace for diagnostic settings. Leave empty to skip.')
 param logAnalyticsWorkspaceId string = ''
 
@@ -76,6 +79,18 @@ resource keyVaultSecretsUserRoleAssignment 'Microsoft.Authorization/roleAssignme
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleDefinitionId)
   }
 }
+
+// Grant the Power Apps Key Vault connector caller (per-user OAuth) read access.
+// Without this, GetSecret() returns 403 from inside the VNet-injected Managed Environment.
+resource demoUserSecretsUserRoleAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in demoUserPrincipalIds: {
+  name: guid(keyVault.id, principalId, keyVaultSecretsUserRoleDefinitionId)
+  scope: keyVault
+  properties: {
+    principalId: principalId
+    principalType: 'User'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleDefinitionId)
+  }
+}]
 
 output keyVaultName string = keyVault.name
 output keyVaultUri string = keyVault.properties.vaultUri

@@ -14,6 +14,12 @@
 - **2026-05-21T04:19:51Z** — `NewNetworkInjection` appearing in `lifecycleOperationsEnforcement.allowedOperations` does NOT mean no EP is linked. After a successful `NewNetworkInjection` the field may still appear in `allowedOperations` alongside `SwapNetworkInjection` and `RevertNetworkInjection`. The only reliable linkage indicators are: (a) the lifecycle op history showing a `NewNetworkInjection: Succeeded` op, and (b) re-submitting the link call, which will return 202 and complete as `SwapNetworkInjection: Succeeded` (not as a new `NewNetworkInjection`).
 - **2026-05-21T05:10:00Z** — The correct PPAC path for wiring App Insights telemetry to a Managed Environment is **Manage (left nav) → Data export → App Insights tab → New data export** (resource picker flow; no connection string paste needed). The earlier path "Environments → Settings → Product → Features → Application Insights" does NOT exist in current PPAC. Additionally, all sub-resource REST endpoints probed for data export on both `api.bap.microsoft.com` and `api.powerplatform.com` returned 404 — no public REST path was found. Reference: `learn.microsoft.com/power-platform/admin/set-up-export-application-insights`.
 
+## Learnings — 2026-05-21T12:46:19-05:00 (blank label / silent 403)
+
+- **Canvas silently swallows connector 403s.** When `AzureKeyVault.GetSecret` fails with 403 (RBAC missing), the `Set()` call stores blank into the variable with no error banner. The symptom is an empty label, not an error message. Use `IfError(AzureKeyVault.GetSecret("demo-secret").value, FirstError.Message & " | " & FirstError.Source, ...)` on a diagnostic label to surface the actual error code.
+- **RBAC confirmed missing at 12:46 on 2026-05-21.** `az role assignment list` on the KV scope shows only one entry: `Key Vault Secrets User` on a `ServicePrincipal` (the UAMI from Bicep). No user assignment for `admin@MngEnvMCAP423074.onmicrosoft.com`. CLI couldn't resolve the UPN (`az ad user show` fails — CLI signed into a different tenant), so portal IAM is the reliable fallback for granting the role.
+- **Portal IAM path:** KV → **Access control (IAM)** → **+ Add role assignment** → **Key Vault Secrets User** → select `admin@...` → assign. Allow 2–5 min for propagation before retrying in Power Apps.
+
 ## Learnings — 2026-05-21T12:46:19-05:00 (KV connector formula fix)
 
 - **GetSecret signature:** The Azure Key Vault connector `GetSecret` action takes **one** parameter — `secretName` only. The vault name is bound when the connection is created (entered in the connection dialog), not passed to the function. Passing vault name as a first arg (`GetSecret("vault", "secret")`) has no valid overload in Canvas Apps and produces a red underline. Correct: `AzureKeyVault.GetSecret("demo-secret").value`. Confirmed against `https://learn.microsoft.com/en-us/connectors/keyvault/` — Parameters section lists only `secretName (True, string)`.
@@ -52,3 +58,7 @@
 ## Team Update — 2026-05-20T15:50:00-05:00
 
 **Monitoring trio coordination complete.** App Insights (workspace-based) wired to Trinity's LAW; script 02 now binds PP Managed Environment to App Insights via BAP admin REST PATCH (idempotent, workaround for missing cmdlet in v0.17.0). Script 04 enables connector telemetry + prints canonical KQL queries for Niobe's docs/monitoring.md. Zero integration conflicts; all scripts parse-clean. See `.squad/orchestration-log/2026-05-20T15-50-00Z-tank-1.md` and `.squad/skills/pp-app-insights-wiring/SKILL.md` for REST API pattern (reusable for future PP integrations).
+
+## Team Update — 2026-05-21T19:30:00Z
+
+**KV demo RBAC automation baked into deploy script:** `scripts/01-deploy.sh` now auto-resolves signed-in user OID and injects via `--demo-user-oid` flag; grants `Key Vault Secrets User` role on demo vault automatically. Supports `--no-auto-demo-user` to suppress.

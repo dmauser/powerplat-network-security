@@ -47,3 +47,7 @@
 - DNS A record in `privatelink.database.windows.net` → PE-SQL private IP
 - SQL diagnostic settings (`diag-sql`) created and streaming to LAW
 - `.azure/last-deploy-outputs.json` contains non-empty `sqlServerFqdn` + `sqlDatabaseName`
+
+## Team Update — 2026-05-21T19:30:00Z
+
+**KV demo RBAC automation baked into IaC:** Bicep `demoUserPrincipalIds` parameter added to `infra/modules/keyvault.bicep` and wired through `infra/main.bicep`; emits per-user role assignments for `Key Vault Secrets User` at deploy time.

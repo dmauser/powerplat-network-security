@@ -38,6 +38,9 @@ param logAnalyticsRetentionDays int = 30
 @description('Enable Azure Monitor alert rules. Set true to activate alerts; false deploys only the action group stub.')
 param enableAlerts bool = false
 
+@description('Optional. Object IDs of interactive users (e.g., the demo operator) granted Key Vault Secrets User on the demo vault. Required for the Power Apps Key Vault connector (per-user OAuth) to read demo-secret. scripts/01-deploy.sh populates this with the current signed-in user when not overridden.')
+param demoUserPrincipalIds array = []
+
 var resourceGroupName = empty(resourceGroupNameOverride) ? 'rg-${prefix}-${env}' : resourceGroupNameOverride
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -116,6 +119,7 @@ module keyVault 'modules/keyvault.bicep' = {
     location: defaultLocation
     tags: tags
     uamiPrincipalId: managedIdentity.outputs.userAssignedIdentityPrincipalId
+    demoUserPrincipalIds: demoUserPrincipalIds
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
   }
 }
