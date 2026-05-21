@@ -99,21 +99,33 @@ az network private-dns link vnet list \
 # Expected: both VNet resource IDs (eastus and westus)
 ```
 
-### Verify via telemetry
+## Troubleshooting
 
-After confirming DNS and network plumbing, check the Key Vault audit logs to see the successful `SecretGet` operation logged with the correct private IP. See [monitoring.md → query (a)](../monitoring.md#query-a-is-power-platform-reaching-key-vault-over-the-private-endpoint) for the KQL query and expected log format.
+If the flow action fails with `403 Forbidden` or times out, use this troubleshooting path:
 
-## Troubleshooting checklist
+### Quick checklist
 
-If you still see `403 Forbidden` even in the Managed Environment, check the following in order:
+1. **RBAC missing**: Confirm the calling identity has permission to read secrets from the vault (Key Vault Secrets User role).
+2. **Environment not linked**: Verify `Enable-SubnetInjection` completed successfully and the environment is attached to `<enterprisePolicyArmId>`.
+3. **Region mismatch**: Verify `Get-EnvironmentRegion` aligns with the paired eastus and westus deployment.
+4. **Secret name typo**: Confirm the secret really is named `demo-secret`.
+5. **DNS resolves to public IP**: Verify `<keyVaultName>.vault.azure.net` resolves to the private endpoint IP (10.10.x.x), not a public address.
 
-1. **RBAC missing**: confirm the calling identity has permission to read secrets from the vault.
-2. **Environment not linked**: verify `Enable-SubnetInjection` completed successfully and the environment is attached to `<enterprisePolicyArmId>`.
-3. **Region mismatch**: verify `Get-EnvironmentRegion` aligns with the paired eastus and westus deployment.
-4. **Secret name typo**: confirm the secret really is named `demo-secret`.
-5. **DNS issue**: verify `<keyVaultName>.vault.azure.net` resolves to the private endpoint IP from the Azure side.
+### Diagnostic tests
 
-For deeper fixes, see [troubleshooting.md](../troubleshooting.md#403-forbidden-from-kv-connector-even-in-managed-env).
+For systematic troubleshooting, use the PowerShell diagnostic module:
+
+- **DNS resolution not working**: See [troubleshooting.md § 5.2: Hostname not found](../troubleshooting.md#scenario-52-hostname-not-found)
+- **Public IP returned instead of private**: See [troubleshooting.md § 5.3: Public IP returned instead of private](../troubleshooting.md#scenario-53-public-ip-returned-instead-of-private)
+- **Cannot establish TCP connection**: See [troubleshooting.md § 5.4: Can't connect to resource](../troubleshooting.md#scenario-54-cant-connect-to-resource)
+- **TLS handshake fails**: See [troubleshooting.md § 5.5: TLS handshake fails](../troubleshooting.md#scenario-55-tls-handshake-fails)
+- **Connectivity OK but flow returns 403**: See [troubleshooting.md § 5.6: Connectivity OK but app fails](../troubleshooting.md#scenario-56-connectivity-ok-but-app-fails)
+
+For a complete worked example, see [troubleshooting.md: worked example](../troubleshooting.md#worked-example-key-vault-private-path-end-to-end).
+
+### Telemetry verification
+
+After confirming DNS and network plumbing, check the Key Vault audit logs to see the successful `SecretGet` operation logged with the correct private IP. See [monitoring.md](../monitoring.md#starter-kql-queries) for KQL queries that confirm private endpoint traffic.
 
 ## Learn more
 

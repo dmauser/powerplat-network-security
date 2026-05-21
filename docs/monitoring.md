@@ -1,6 +1,6 @@
 # Network observability and monitoring
 
-This guide documents how to capture and analyze private endpoint inbound traffic (via Network Security Perimeter in Learning mode) and VNet flows (via Traffic Analytics) to verify that Power Platform reaches private Azure resources through delegated subnets only. NSP in Learning mode observes traffic without enforcing restrictions, while VNet flow logs and Traffic Analytics provide layer 3–4 visibility into all flows. Together, they enable operators to audit and troubleshoot the private path.
+This guide documents how to capture and analyze private endpoint inbound traffic (via Network Security Perimeter in Learning mode) and VNet flows (via Traffic Analytics) to verify that Power Platform reaches private Azure resources through delegated subnets only. NSP in Learning mode observes traffic without enforcing restrictions, while VNet flow logs and Traffic Analytics provide layer 3–4 visibility into all flows. Together, they enable operators to audit and troubleshoot the private path. For active troubleshooting (DNS, TCP, TLS tests), see [troubleshooting.md](./troubleshooting.md).
 
 ## Contents
 

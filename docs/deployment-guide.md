@@ -137,6 +137,17 @@ If SQL connectivity is slow on first use, note the expected [serverless cold sta
 
 After validation passes, proceed to [monitoring.md](./monitoring.md) to confirm observability is in place.
 
+### Post-deploy diagnostics
+
+Once the validation script passes, you have a confirmed baseline. Use the diagnostic cmdlets in [troubleshooting.md](./troubleshooting.md#prerequisites-and-module-setup) to test the private path end-to-end:
+
+- **Different region works but another doesn't** — use `Get-EnvironmentRegion` and `Test-DnsResolution` with the `-Region` parameter to verify both eastus and westus are configured correctly.
+- **DNS resolution to private IP** — use `Test-DnsResolution` to confirm `kv-pbinet-dev-k6ozyjreme.vault.azure.net` resolves to 10.10.x.x, not a public IP.
+- **TCP connectivity** — use `Test-NetworkConnectivity` to confirm the delegated subnet can reach Key Vault:443, SQL:1433, and Storage:443.
+- **TLS handshake** — use `Test-TLSHandshake` to confirm the full secure path works end-to-end.
+
+See [troubleshooting.md: worked example](./troubleshooting.md#worked-example-key-vault-private-path-end-to-end) for a step-by-step walkthrough. If any test fails, refer to the matching scenario section in [troubleshooting.md](./troubleshooting.md).
+
 ### Network observability verification
 
 Before running connector flows, confirm that Network Security Perimeter and VNet flow logs are active:

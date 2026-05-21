@@ -211,6 +211,15 @@ The maker configures runtime artifacts after the environment is linked:
 - Prepare demo data that is not created by Bicep today, such as SQL objects and sample rows like `dbo.Sales`, and blob content such as `demo/hello.txt`.
 - Run the validation flows documented in [deployment-guide.md](./deployment-guide.md) and [demo-script.md](./demo-script.md).
 
+## Diagnostics & observability
+
+After deployment, operators can verify the private path is working:
+
+- **Active diagnostics** — Use the PowerShell cmdlets in [troubleshooting.md](./troubleshooting.md) to test DNS resolution, network connectivity, and TLS handshakes from the delegated subnet to each resource. See [troubleshooting.md: reference](./troubleshooting.md#reference-diagnostic-cmdlets) for the cmdlet reference table.
+- **Passive monitoring** — Enable Network Security Perimeter in Learning mode and VNet flow logs to capture all traffic (successful and denied). See [monitoring.md](./monitoring.md) for setup and KQL queries that confirm private path usage and identify issues.
+
+Both are complementary: diagnostics answer *whether* a connection works; monitoring answers *how it flows* through the network layers and *why it fails*.
+
 ## Learn more
 
 - [Virtual network support for Power Platform overview](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview)
