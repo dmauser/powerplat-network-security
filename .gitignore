@@ -1,10 +1,10 @@
-# Squad: ignore runtime state (logs, inbox, sessions)
+# Squad: ignore runtime state (logs, sessions, scratch)
 # Allow timestamped orchestration and session logs (managed by Scribe)
 .squad/orchestration-log/
 !.squad/orchestration-log/*.md
 .squad/log/
 !.squad/log/*.md
-.squad/decisions/inbox/
+# decisions/inbox is the agent drop-box — MUST be tracked (do NOT add it here)
 .squad/sessions/
 .squad/.scratch/
 # Squad: SubSquad activation file (local to this machine)
