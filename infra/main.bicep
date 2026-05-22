@@ -105,9 +105,8 @@ module network 'modules/network.bicep' = {
 }
 
 // East flow-logs storage — deployed in eastus (must match NetworkWatcher_eastus region).
-// NOTE: fl-vnet-pbinet-dev-east and NetworkWatcher_eastus are currently in NetworkWatcherRG
-// (Azure auto-created them there). They are flagged for future migration to rg-pbinet-dev-eastus
-// but are NOT touched in this run to avoid disruption.
+// NetworkWatcher_eastus and fl-vnet-pbinet-dev-east were moved from NetworkWatcherRG →
+// rg-pbinet-dev-eastus via az resource move. All flow-log resources now live in rg-pbinet-dev-eastus.
 module flowLogsStorage 'modules/flow-logs-storage.bicep' = {
   name: 'flowlogs-storage-${prefix}-${env}'
   scope: rg
@@ -136,12 +135,11 @@ module flowLogsStorageWest 'modules/flow-logs-storage.bicep' = {
   }
 }
 
-// East flow log — still scoped to NetworkWatcherRG because NetworkWatcher_eastus lives there.
-// TODO: migrate NetworkWatcher_eastus + fl-vnet-pbinet-dev-east to rg-pbinet-dev-eastus
-// via az resource move (same pattern used for westus). Update this scope to `rg` when done.
+// East flow log — scoped to rg (rg-pbinet-dev-eastus). NetworkWatcher_eastus was moved from
+// NetworkWatcherRG → rg-pbinet-dev-eastus via az resource move on 2026-05-21, matching west.
 module flowLogEast 'modules/flow-logs.bicep' = {
   name: 'flowlog-east-${prefix}-${env}'
-  scope: resourceGroup('NetworkWatcherRG')
+  scope: rg
   params: {
     location: regionA
     flowLogName: 'fl-vnet-${prefix}-${env}-east'
