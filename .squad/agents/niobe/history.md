@@ -58,6 +58,25 @@
 
 **Monitoring trio coordination complete.** docs/monitoring.md (17.5 KB) delivered with 6 KQL queries, Mermaid telemetry flowchart, and 8-file cross-link refresh (0 broken links). Documentation freshness audit confirmed all changes (region, bypass, script pins, connector tests) are synced and production-ready. Trinity's `logAnalyticsWorkspaceName`/`logAnalyticsWorkspaceId` outputs adopted consistently in docs; Tank's scripts 02+04 referenced explicitly in workflow section. Pattern: Private endpoint monitoring operator guide (structure: operator questions → KQL queries → decision tree → cost note) extracted as reusable skill for future services. See `.squad/orchestration-log/2026-05-20T15-50-00Z-niobe-3.md` for full audit results.
 
+## Session: 2026-05-21T23:26Z — Part 4 Documented as Planned/Blocked (Niobe-Part4-Planned)
+
+**Timestamp:** 2026-05-21T23:26:09Z  
+**Status:** Completed
+
+**Work:**
+- Lifted Tank's tank-part4-deploy-verified.md architectural handover into docs/demos/keyvault-demo.md Part 4 section
+- Added clear "BLOCKED" callout: MCAP subscription has zero VM quota for all App Service Plan SKUs
+- Documented unblock path: request quota increase or use Pay-As-You-Go subscription
+- Included concrete deploy command (once quota available): `az deployment group create --resource-group rg-pbinet-dev-eastus --template-file infra/deploy-funcapp-only.bicep --parameters aspSkuName=S1 aspSkuTier=Standard`
+- Documented expected KQL outputs (architectural, not live-verified due to quota): Key Vault AzureDiagnostics showing 10.10.2.X (east) and 10.20.2.X (west) CallerIPAddress values
+
+**Learning:**
+- Part 4 architecture (dual-region function app for deterministic private-path demo) is conceptually sound and code-complete. Deployment blocked only by subscription-level quota constraint, not IaC or operational issues.
+
+**Deliverable:** Part 4 section in keyvault-demo.md; orchestration log entry created.
+
+---
+
 ## Punch List — Queued for Niobe (2026-05-20T21:06:15-05:00)
 
 **P6 — Close PE Diagnostic Gap in decisions.md:** Update the monitoring section in `.squad/decisions.md` to reflect the platform limitation discovered during Neo's audit:

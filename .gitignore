@@ -1,6 +1,9 @@
 # Squad: ignore runtime state (logs, inbox, sessions)
+# Allow timestamped orchestration and session logs (managed by Scribe)
 .squad/orchestration-log/
+!.squad/orchestration-log/*.md
 .squad/log/
+!.squad/log/*.md
 .squad/decisions/inbox/
 .squad/sessions/
 .squad/.scratch/
@@ -14,6 +17,8 @@
 .azure/
 
 # Bicep build artifacts
+infra/**/*.json
+!infra/dev.parameters.json
 infra/**/*.json.tmp
 **/main.json
 **/*.compiled.json

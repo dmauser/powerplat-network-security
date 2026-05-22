@@ -85,6 +85,26 @@
 
 **KV demo RBAC automation baked into deploy script:** `scripts/01-deploy.sh` now auto-resolves signed-in user OID and injects via `--demo-user-oid` flag; grants `Key Vault Secrets User` role on demo vault automatically. Supports `--no-auto-demo-user` to suppress.
 
+## Session: 2026-05-21T23:26Z — West Flow Log Migrated to rg-pbinet-dev-eastus (Tank-5)
+
+**Timestamp:** 2026-05-21T23:26:09Z  
+**Status:** Completed (in parallel with east migration in-flight)
+
+**Work:**
+- West VNet flow log deployed into NetworkWatcherRG, then migrated to `rg-pbinet-dev-eastus` per single-RG directive
+- Discovered: Azure enforces one NetworkWatcher per region per subscription; `az network watcher configure` does NOT re-create in different RG
+- Applied `az resource move` to move watcher + flow log + storage account together from NetworkWatcherRG to target RG
+- Bicep main.bicep updated: flowLogsStorageWest and flowLogWest scope changed to `rg` (previously `resourceGroup('NetworkWatcherRG')`)
+- East migration flagged as TODO; uses same pattern (move watcher from NetworkWatcherRG, re-deploy flow log resource to fix storageId reference)
+- All west resources now in `rg-pbinet-dev-eastus` ✅
+
+**Learning:**
+- Platform constraint: NetworkWatcher is singleton per region; cannot migrate between RGs via `az network watcher configure`. `az resource move` is the workaround that honors the single-RG directive while respecting Azure's region+subscription uniqueness constraint.
+
+**Deliverable:** tank-west-flowlog-deployed.md merged into decisions.md; orchestration log entry created.
+
+---
+
 ## Session: 2026-05-21 — Coordinator Planning + Tank Part 4 Scoping
 
 **Task:** Document Part 4 expansion scope (stress testing, performance profiling).
