@@ -256,6 +256,25 @@
 - No public REST endpoint found; manual PPAC click-path only
 - Documented in `docs/lab-completion-checklist.md` with exact steps
 
+### East Flow Log + Watcher Migration Complete
+- **Date:** 2026-05-21
+- **Commit:** faeeab1
+- **Author:** Tank (infra)
+- **Status:** Completed
+- **Action:** Migrated `NetworkWatcher_eastus` and child `fl-vnet-pbinet-dev-east` from `NetworkWatcherRG` → `rg-pbinet-dev-eastus` using `az resource move`. Completes single-RG directive: all lab resources now in `rg-pbinet-dev-eastus`.
+- **Platform constraint resolved:** Azure enforces one NetworkWatcher per region per subscription; `az network watcher configure` silently returns existing watcher (does NOT re-create in different RG). `az resource move` is the workaround.
+- **Bicep change:** `infra/main.bicep` — `flowLogEast` scope changed from `resourceGroup('NetworkWatcherRG')` → `rg`. East and west modules now symmetric.
+- **Known drift:** `uniqueString` collision for west storage (both modules scoped to same RG now produce same hash). Live west storage created when scoped to NetworkWatcherRG and has different name than Bicep generates scoped to rg. Future: parameterize west storage name or add location to uniqueString seed.
+
+### East Flow Log Gitignore Correction + Tech Debt Seeding
+- **Date:** 2026-05-21
+- **Commit:** 6a029ef
+- **Author:** Tank (infra)
+- **Status:** Completed + GitHub issue #1 opened
+- **Action:** Fixed `.gitignore` removing erroneous `.squad/decisions/inbox/` exclusion that blocked east handover from git tracking. Committed orphaned `tank-east-flowlog-migrated.md` into git.
+- **Tech debt discovery:** `uniqueString(resourceGroup().id)` seed is identical for east + west flow-logs storage resources when both scoped to `rg-pbinet-dev-eastus`. This causes Bicep to generate the same storage account name for both regions (collision at plan time). The live west storage `stpbinetfldevwiqxkvrtksy` was deployed into NetworkWatcherRG scope (different uniqueString seed) and thus has a different name than what Bicep generates now. A clean re-deploy would create a new storage account and leave the old one orphaned.
+- **Opened GitHub issue #1:** "Tech debt: seed uniqueString with location for regional resource uniqueness." Documents the collision and recommends updating `infra/modules/flow-logs-storage.bicep` to include `location` in the uniqueString seed (e.g., `uniqueString(resourceGroup().id, location)`) to ensure east + west storage accounts have unique names deterministically.
+
 ---
 
 ## Decision Record Index
@@ -267,6 +286,8 @@
 | Part 4 Dual-Region Function App | Trinity | 2026-05-21T16:43 | Implemented |
 | NSP Audit-Only Spec | Morpheus | 2026-05-21 | Accepted |
 | West Flow Logs → rg-pbinet-dev-eastus | Tank | 2026-05-21T18:15 | Completed |
+| East Flow Logs → rg-pbinet-dev-eastus | Tank | 2026-05-21 | Completed |
+| Gitignore + Issue #1 | Tank | 2026-05-21 | Completed |
 | App Insights Dependencies Convention | Neo | 2026-05-21T15:15 | Established |
 | KQL Validation Queries | Neo | 2026-05-21T14:49 | Complete |
 | Troubleshooting Guide | Niobe | 2026-05-21T15:09 | Complete |

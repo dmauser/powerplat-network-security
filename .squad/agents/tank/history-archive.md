@@ -21,13 +21,22 @@ This file contains archived learnings from earlier phases. See `history.md` for 
 - **2026-05-20T17:05:00-05:00** — `az login` with a personal MSA (Hotmail) account returns an empty PP environment list from `/scopes/admin/environments` and 404 for specific environment lookups. Power Platform admin operations require a work/school account with the **Power Platform Administrator** or **Global Administrator** Entra role. Verify with `az account show --query user.name` — if it's `@hotmail.com` or `@outlook.com`, re-login with the correct tenant.
 - **2026-05-20T17:05:00-05:00** — Bicep outputs may omit `appInsightsResourceId` and `appInsightsInstrumentationKey` if the IaC module doesn't explicitly output them. Script 02 reads these under `Set-StrictMode -Version Latest` and fails if missing. Workaround: derive `resourceId` via `az resource show` and parse `InstrumentationKey=` from the connection string, then patch `.azure/last-deploy-outputs.json`. Long-term fix: add these to `infra/main.bicep` outputs.
 
-## Learnings Archive — Phase 2 Round 2 (2026-05-20T18:50:00-05:00)
+## Learnings Archive — Phase 2 Round 3 (2026-05-21T00:00:00Z)
 
-- **2026-05-20T18:50:00-05:00** — BAP enterprise policy link API (`POST /enterprisePolicies/NetworkInjection/link`) requires the calling user to have `ManageProtectionKeys` permission in the environment. This maps to the **Power Platform Administrator** Entra role (tenant-wide) OR the **System Administrator** Dataverse security role (environment-scope). `Global Reader` + Azure Subscription Owner is NOT sufficient.
-- **2026-05-20T18:50:00-05:00** — The correct full environment ID for default PP environments has a `Default-` prefix: `Default-{tenantId}`. In this tenant the environment ID is `Default-ebf541ac-cacf-4a40-b46e-1accc3810ef8`. The bare GUID alone returns 404.
-- **2026-05-20T18:50:00-05:00** — `NewNetworkInjection` in `lifecycleOperationsEnforcement.allowedOperations` is only present when the environment has no Dataverse instance yet. After Dataverse provisioning it changes to `SwapNetworkInjection` + `RevertNetworkInjection`. The underlying BAP API endpoint (`POST /enterprisePolicies/NetworkInjection/link`) is the same for both cases.
-- **2026-05-20T18:50:00-05:00** — Provisioning a Dataverse database via `POST /provisionInstance` (with `CreateDatabase` permission) does NOT grant the caller `ManageProtectionKeys`. The Dataverse System Administrator role grants `prvAssignRole` and data access, but the BAP API checks PP-platform-level permissions separately. You need the Power Platform Administrator Entra role to call the enterprise policy link endpoint.
-- **2026-05-20T18:50:00-05:00** — CDX tenant (`MngEnvMCAP423074.onmicrosoft.com`) breakglass account is `ms-breakglass@MngEnvMCAP423074.onmicrosoft.com`. It is the only Global Administrator in the tenant. CDX credentials can be retrieved from the CDX/Transform portal. The `admin@` account only has `Global Reader` Entra role despite being Azure Subscription Owner.
+- **2026-05-21T00:00:00Z** — Default PP environments start with `governanceConfiguration.protectionLevel: "Basic"`. This blocks `NewNetworkInjection` with `400 InvalidLifecycleOperationRequest`. Fix: `Set-AdminPowerAppEnvironmentGovernanceConfiguration -EnvironmentName $envId -UpdatedGovernanceConfiguration @{ protectionLevel = "Standard" }`.
+- **2026-05-21T00:00:00Z** — After successful `NewNetworkInjection` lifecycle op, the BAP link endpoint remains callable and executes as `SwapNetworkInjection` — fully idempotent. GET endpoint returns 404 regardless of link state; use lifecycle ops poll result as authoritative.
+- **2026-05-21T00:00:00Z** — `applicationInsightsId` + `applicationInsightsKey` NOT valid in BAP admin REST API. App Insights binding for PP ME only configurable via PPAC admin center UI (Manage → Data export → App Insights tab).
+- **2026-05-21T00:00:00Z** — ARM `healthStatus` remains `Undetermined` even after confirmed `NewNetworkInjection: Succeeded`. Transition to `Running` requires PP control plane infrastructure. `Undetermined` NOT a failure sign.
+- **2026-05-21T00:00:00Z** — Canvas silently swallows connector 403s. `AzureKeyVault.GetSecret` failure stores blank, no error banner. Use `IfError()` on diagnostic label to surface error code.
+- **2026-05-21T05:10:00Z** — Correct PPAC path for App Insights binding: Manage → Data export → App Insights tab → New data export. No public REST endpoint found; manual PPAC path only.
+
+## Team Update — 2026-05-21T00:00:00Z (Phase 2 Completion Milestone)
+
+**PHASE 2 COMPLETE.** Default ME linked to enterprise policy; network validation 20 PASS / 0 GAP. Tank: ME linkage succeeded with governance prerequisite discovered (Basic → Standard tier); App Insights PPAC path corrected. Neo: All 24 validation checks executed; 3 script bugs identified. Niobe: Lab completion checklist delivered. All decisions merged from inbox. Daniel ready to resume Phase 3: manual App Insights binding via PPAC, connector smoke tests, SQL re-enable when capacity available.
+
+---
+
+*For current recent activity, see tank/history.md.*
 - **2026-05-20T18:50:00-05:00** — The `managedenvironments-ar-tenant-connector` service principal (appId `14735148-5162-46ef-99a4-c1923d08a2cc`) has Global Administrator role in the tenant. It is a Microsoft-managed service app for managed environments integration. Its credentials cannot be retrieved without Global Admin or Application Administrator Entra role.
 
 ## Learnings Archive — Phase 2 Option B Attempt (2026-05-20T21:48:40-05:00)
